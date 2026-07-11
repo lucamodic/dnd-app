@@ -9,6 +9,7 @@ import { Text } from "@/components/Text";
 import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { HpBar } from "@/components/HpBar";
+import { NumberEditorModal } from "@/components/sheet/editors";
 import {
   useTracker,
   useTrackerNext,
@@ -130,10 +131,21 @@ function ParticipantRow({
   const canEdit = isAdmin || isOwner;
   const isMonster = participant.type === "monster";
   const accent = participant.color || (isMonster ? colors.secondary : colors.accent);
+  const [initEditOpen, setInitEditOpen] = useState(false);
+  const [tempHpEditOpen, setTempHpEditOpen] = useState(false);
 
   const changeHp = (delta: number) => {
     if (!canEdit) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (delta < 0) {
+      const damage = Math.abs(delta);
+      const tempAbsorb = Math.min(participant.tempHp || 0, damage);
+      const nextTempHp = Math.max(0, (participant.tempHp || 0) - tempAbsorb);
+      const remainingDamage = damage - tempAbsorb;
+      const nextHp = Math.max(0, participant.hp - remainingDamage);
+      patch.mutate({ pid: participant._id, hp: nextHp, tempHp: nextTempHp });
+      return;
+    }
     patch.mutate({ pid: participant._id, hp: Math.max(0, Math.min(participant.maxHp, participant.hp + delta)) });
   };
 
@@ -145,12 +157,18 @@ function ParticipantRow({
       style={[styles.pRow, active && { borderColor: accent, borderWidth: 1.5 }, shadow.card]}
     >
       {active && <LinearGradient colors={[accent + "22", "transparent"]} style={StyleSheet.absoluteFill} />}
-      <View style={styles.initBox}>
+      <Pressable
+        style={styles.initBox}
+        disabled={!canEdit}
+        onPress={() => setInitEditOpen(true)}
+        hitSlop={6}
+      >
         <Text style={[styles.initNum, active && { color: accent }]}>{participant.initiative}</Text>
         <Text variant="caption" color={colors.textFaint}>
           init
         </Text>
-      </View>
+        {canEdit && <Ionicons name="pencil" size={9} color={colors.textFaint} style={{ marginTop: 2 }} />}
+      </Pressable>
 
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -165,20 +183,49 @@ function ParticipantRow({
           )}
         </View>
         <View style={{ marginTop: 6 }}>
-          <HpBar current={participant.hp} max={participant.maxHp} height={10} />
+          <HpBar current={participant.hp} max={participant.maxHp} temp={participant.tempHp || 0} height={10} />
         </View>
-        <Text variant="caption" style={{ marginTop: 3 }}>
-          {participant.hp}/{participant.maxHp} PV · CA {participant.ac}
-        </Text>
+        <View style={styles.hpMetaRow}>
+          <Text variant="caption">
+            {participant.hp}
+            {(participant.tempHp || 0) > 0 ? ` + ${participant.tempHp}` : ""}/{participant.maxHp} PV · CA {participant.ac}
+          </Text>
+          {canEdit && (
+            <Pressable onPress={() => setTempHpEditOpen(true)} hitSlop={6} style={styles.tempMiniChip}>
+              <Text style={styles.tempMiniText}>Temp {participant.tempHp || 0}</Text>
+            </Pressable>
+          )}
+        </View>
       </View>
 
       {canEdit && (
         <View style={styles.pActions}>
           <MiniBtn icon="remove" onPress={() => changeHp(-1)} />
           <MiniBtn icon="add" onPress={() => changeHp(1)} />
-          {isAdmin && <MiniBtn icon="close" onPress={() => remove.mutate(participant._id)} danger />}
+          <MiniBtn icon="close" onPress={() => remove.mutate(participant._id)} danger />
         </View>
       )}
+
+      <NumberEditorModal
+        visible={initEditOpen}
+        title="Iniciativa"
+        subtitle={`Cambiar la iniciativa de ${participant.name}.`}
+        value={participant.initiative}
+        min={-5}
+        max={40}
+        onClose={() => setInitEditOpen(false)}
+        onSave={(v) => patch.mutate({ pid: participant._id, initiative: v })}
+      />
+      <NumberEditorModal
+        visible={tempHpEditOpen}
+        title="Vida temporal"
+        subtitle={`Cambiar la vida temporal de ${participant.name}.`}
+        value={participant.tempHp || 0}
+        min={0}
+        max={999}
+        onClose={() => setTempHpEditOpen(false)}
+        onSave={(v) => patch.mutate({ pid: participant._id, tempHp: v })}
+      />
     </MotiView>
   );
 }
@@ -345,6 +392,16 @@ const styles = StyleSheet.create({
   initBox: { alignItems: "center", width: 42 },
   initNum: { fontFamily: font.display, fontSize: 24, color: colors.text },
   turnPill: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.pill },
+  hpMetaRow: { marginTop: 3, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  tempMiniChip: {
+    backgroundColor: "#4EA3FF22",
+    borderColor: "#4EA3FF66",
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  tempMiniText: { color: "#8FC5FF", fontFamily: font.bodyBold, fontSize: 11 },
   pActions: { gap: 6 },
   miniBtn: {
     width: 30,

@@ -87,10 +87,11 @@ function CharacterCard({ character, delay }: { character: Character; delay: numb
         <View style={styles.hpRow}>
           <Text variant="caption">Vida</Text>
           <Text variant="caption" color={colors.textDim}>
-            {character.currentHp} / {character.maxHp}
+            {character.currentHp}
+            {(character.tempHp || 0) > 0 ? ` + ${character.tempHp}` : ""} / {character.maxHp}
           </Text>
         </View>
-        <HpBar current={character.currentHp} max={character.maxHp} />
+        <HpBar current={character.currentHp} max={character.maxHp} temp={character.tempHp || 0} />
       </View>
     </Card>
   );

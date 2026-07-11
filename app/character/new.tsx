@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ActivityIndicator, Image, StyleSheet, TextInput, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { router, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { MotiView, AnimatePresence } from "moti";
@@ -8,8 +8,10 @@ import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
-import { useClasses, useRaces, useCreateCharacter, Race, Clazz } from "@/api/hooks";
-import { abilityMod, formatMod } from "@/lib/format";
+import { useClasses, useRaces, useCreateCharacter, useRollStats, Race, Clazz, AbilityScores } from "@/api/hooks";
+import { abilityMod, formatMod, ABILITY_ORDER, ABILITY_LABELS } from "@/lib/format";
+import { ClassIcon } from "@/components/ClassIcon";
+import { RaceImage } from "@/components/RaceImage";
 import { colors, font, radius } from "@/theme";
 
 type Step = 0 | 1 | 2;
@@ -18,11 +20,29 @@ export default function NewCharacter() {
   const { data: races, isLoading: racesLoading } = useRaces();
   const { data: classes, isLoading: classesLoading } = useClasses();
   const createCharacter = useCreateCharacter();
+  const rollStats = useRollStats();
 
   const [step, setStep] = useState<Step>(0);
   const [race, setRace] = useState<Race | null>(null);
   const [cls, setCls] = useState<Clazz | null>(null);
   const [name, setName] = useState("");
+  const [stats, setStats] = useState<AbilityScores | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
+  }, [step]);
+
+  // Al pasar al paso final, tiramos las características según la clase.
+  const goToNaming = async () => {
+    if (!cls) return;
+    setStep(2);
+    try {
+      setStats(await rollStats.mutateAsync(cls._id));
+    } catch {
+      setStats(null);
+    }
+  };
 
   const onCreate = async () => {
     if (!race || !cls || !name.trim()) return;
@@ -30,12 +50,13 @@ export default function NewCharacter() {
       name: name.trim(),
       raceId: race._id,
       classId: cls._id,
+      ...(stats ? { abilityScores: stats } : {}),
     });
     router.replace(`/character/${character._id}`);
   };
 
   return (
-    <Screen>
+    <Screen scrollViewRef={scrollRef}>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.header}>
         <Ionicons name="arrow-back" size={24} color={colors.text} onPress={() => (step === 0 ? router.back() : setStep((s) => (s - 1) as Step))} />
@@ -68,7 +89,7 @@ export default function NewCharacter() {
             {classes?.map((c, i) => (
               <ClassOption key={c._id} cls={c} selected={cls?._id === c._id} onPress={() => setCls(c)} delay={i * 40} />
             ))}
-            <Button label="Siguiente" icon="arrow-forward" onPress={() => setStep(2)} disabled={!cls} style={{ marginTop: 12 }} />
+            <Button label="Siguiente" icon="arrow-forward" onPress={goToNaming} disabled={!cls} style={{ marginTop: 12 }} />
           </MotiView>
         )}
 
@@ -105,6 +126,42 @@ export default function NewCharacter() {
               </View>
             </Card>
 
+            {/* Características generadas (4d6, las mejores para tu clase) */}
+            <Card style={{ marginTop: 14 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                <Text variant="label">CARACTERÍSTICAS</Text>
+                <Button
+                  label="Volver a tirar"
+                  icon="dice"
+                  small
+                  variant="secondary"
+                  loading={rollStats.isPending}
+                  onPress={async () => cls && setStats(await rollStats.mutateAsync(cls._id))}
+                />
+              </View>
+              <Text variant="caption" style={{ marginTop: 6, marginBottom: 10 }}>
+                Tiramos 6 veces 4d6 y las repartimos según tu clase. Podés cambiarlas después en la ficha.
+              </Text>
+              {rollStats.isPending && !stats ? (
+                <ActivityIndicator color={colors.accent} />
+              ) : (
+                <View style={styles.statsGrid}>
+                  {ABILITY_ORDER.map((key) => (
+                    <View key={key} style={styles.statCell}>
+                      <Text variant="caption">{ABILITY_LABELS[key]}</Text>
+                      <Text style={styles.statVal}>{stats ? stats[key] : "—"}</Text>
+                      <Text variant="caption" color={colors.textFaint}>
+                        {stats ? formatMod(abilityMod(stats[key])) : ""}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              <Text variant="caption" style={{ marginTop: 8 }}>
+                Nota: la raza le suma sus bonos encima al crear el personaje.
+              </Text>
+            </Card>
+
             <Button
               label="Crear héroe"
               icon="sparkles"
@@ -136,13 +193,15 @@ function RaceOption({ race, selected, onPress, delay }: { race: Race; selected: 
   return (
     <Card onPress={onPress} delay={delay} style={[styles.option, selected && styles.optionSelected]}>
       <View style={styles.optionRow}>
-        {race.image ? (
-          <Image source={{ uri: race.image }} style={styles.raceImg} />
-        ) : (
-          <LinearGradient colors={[colors.secondary, colors.primary]} style={styles.raceImg}>
-            <Text style={{ fontFamily: font.display, fontSize: 20, color: colors.text }}>{race.name.charAt(0)}</Text>
-          </LinearGradient>
-        )}
+        <RaceImage
+          uri={race.imageBase64 || race.image}
+          style={styles.raceImg}
+          fallback={
+            <LinearGradient colors={[colors.secondary, colors.primary]} style={styles.raceImg}>
+              <Text style={{ fontFamily: font.display, fontSize: 20, color: colors.text }}>{race.name.charAt(0)}</Text>
+            </LinearGradient>
+          }
+        />
         <View style={{ flex: 1 }}>
           <Text variant="subtitle">{race.name}</Text>
           <Text variant="body" numberOfLines={3} style={{ marginTop: 2, fontSize: 13 }}>
@@ -160,7 +219,7 @@ function ClassOption({ cls, selected, onPress, delay }: { cls: Clazz; selected: 
     <Card onPress={onPress} delay={delay} accent={cls.color} style={[styles.option, selected && styles.optionSelected]}>
       <View style={styles.optionRow}>
         <View style={[styles.classDot, { backgroundColor: cls.color }]}>
-          <Text style={{ color: colors.text, fontFamily: font.display, fontSize: 16 }}>d{cls.hitDie}</Text>
+          <ClassIcon index={cls.index} size={22} color={colors.text} />
         </View>
         <View style={{ flex: 1 }}>
           <Text variant="subtitle">{cls.name}</Text>
@@ -216,4 +275,16 @@ const styles = StyleSheet.create({
   },
   input: { flex: 1, paddingVertical: 15, color: colors.text, fontFamily: font.body, fontSize: 16 },
   summaryRow: { flexDirection: "row", justifyContent: "space-around", marginTop: 16 },
+  statsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "space-between" },
+  statCell: {
+    width: "31%",
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    paddingVertical: 10,
+    alignItems: "center",
+    gap: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  statVal: { fontFamily: font.display, fontSize: 20, color: colors.accent },
 });

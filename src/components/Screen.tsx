@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, RefObject } from "react";
 import { StyleSheet, View, ScrollView, ViewStyle } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,10 +9,11 @@ interface Props {
   scroll?: boolean;
   contentStyle?: ViewStyle;
   padded?: boolean;
+  scrollViewRef?: RefObject<ScrollView | null>;
 }
 
 /** Contenedor base de pantalla: fondo con gradiente sutil + safe area. */
-export function Screen({ children, scroll = true, contentStyle, padded = true }: Props) {
+export function Screen({ children, scroll = true, contentStyle, padded = true, scrollViewRef }: Props) {
   const insets = useSafeAreaInsets();
   const pad = { paddingTop: insets.top + 8, paddingBottom: insets.bottom + 24 };
   const inner: ViewStyle = { ...(padded ? { paddingHorizontal: 20 } : {}), ...contentStyle };
@@ -22,6 +23,7 @@ export function Screen({ children, scroll = true, contentStyle, padded = true }:
       <LinearGradient colors={[colors.surface, colors.bg]} style={StyleSheet.absoluteFill} />
       {scroll ? (
         <ScrollView
+          ref={scrollViewRef}
           style={styles.flex}
           contentContainerStyle={[pad, inner]}
           showsVerticalScrollIndicator={false}

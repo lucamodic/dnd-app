@@ -38,12 +38,17 @@ export const useAuth = create<AuthState>((set) => ({
   },
 
   hydrate: async () => {
-    const token = await SecureStore.getItemAsync(TOKEN_KEY);
-    const userRaw = await SecureStore.getItemAsync(USER_KEY);
-    set({
-      token: token || null,
-      user: userRaw ? (JSON.parse(userRaw) as AuthUser) : null,
-      hydrated: true,
-    });
+    try {
+      const token = await SecureStore.getItemAsync(TOKEN_KEY);
+      const userRaw = await SecureStore.getItemAsync(USER_KEY);
+      set({
+        token: token || null,
+        user: userRaw ? (JSON.parse(userRaw) as AuthUser) : null,
+        hydrated: true,
+      });
+    } catch {
+      // Si SecureStore falla, arrancamos sin sesión en vez de quedar colgados en la splash.
+      set({ token: null, user: null, hydrated: true });
+    }
   },
 }));

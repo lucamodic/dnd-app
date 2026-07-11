@@ -30,7 +30,7 @@ export default function RootLayout() {
   const hydrate = useAuth((s) => s.hydrate);
   const hydrated = useAuth((s) => s.hydrated);
 
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Cinzel_600SemiBold,
     Cinzel_700Bold,
     Inter_400Regular,
@@ -43,11 +43,21 @@ export default function RootLayout() {
     hydrate();
   }, [hydrate]);
 
-  useEffect(() => {
-    if (fontsLoaded && hydrated) SplashScreen.hideAsync().catch(() => {});
-  }, [fontsLoaded, hydrated]);
+  // Si las fuentes fallan (fontError), seguimos igual con las del sistema.
+  const fontsReady = fontsLoaded || !!fontError;
+  const ready = fontsReady && hydrated;
 
-  if (!fontsLoaded || !hydrated) return null;
+  useEffect(() => {
+    if (ready) SplashScreen.hideAsync().catch(() => {});
+  }, [ready]);
+
+  // Red de seguridad: pase lo que pase, ocultamos la splash a los 3s para no quedar colgados.
+  useEffect(() => {
+    const t = setTimeout(() => SplashScreen.hideAsync().catch(() => {}), 3000);
+    return () => clearTimeout(t);
+  }, []);
+
+  if (!ready) return null;
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.bg }}>

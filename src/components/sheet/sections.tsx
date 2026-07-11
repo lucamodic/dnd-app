@@ -1,20 +1,23 @@
-import { useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Pressable, StyleSheet, TextInput, View } from "react-native";
 import { MotiView, AnimatePresence } from "moti";
 import { Ionicons } from "@expo/vector-icons";
 import { Character, Clazz, Race, ClassResource } from "@/api/hooks";
 import {
   SKILLS,
   skillModifier,
-  saveModifier,
   resourcesAt,
   spellSlotsAt,
   setResourceUsed,
   setSpellSlotUsed,
+  weaponAttackInfo,
 } from "@/lib/sheet";
-import { ABILITY_ORDER, ABILITY_LABELS, ABILITY_FULL, formatMod, abilityMod } from "@/lib/format";
+import { ABILITY_LABELS, formatMod } from "@/lib/format";
+import { WEAPON_BY_INDEX } from "@/data/weapons";
 import { Text } from "@/components/Text";
+import { useDice } from "@/components/dice/DiceProvider";
 import { Pips } from "./Pips";
+import { WeaponModal } from "./editors";
 import { colors, font, radius } from "@/theme";
 
 type UpdateFn = (patch: Partial<Character>) => void;
@@ -25,6 +28,88 @@ const COINS: { key: keyof Character["currency"]; label: string; color: string }[
   { key: "sp", label: "Plata", color: "#C7CCD6" },
   { key: "cp", label: "Cobre", color: "#C08457" },
 ];
+
+/* ---------- Arma equipada ---------- */
+export function WeaponSection({ character, cls, update }: { character: Character; cls: Clazz; update: UpdateFn }) {
+  const weapon = WEAPON_BY_INDEX[character.weapon] || WEAPON_BY_INDEX["unarmed"];
+  const [weaponOpen, setWeaponOpen] = useState(false);
+  const { roll } = useDice();
+  const attack = weaponAttackInfo(character, weapon);
+  const damageNotation = weapon.damageDice && weapon.damageDice.includes("d")
+    ? `${weapon.damageDice}${attack.abilityBonus >= 0 ? `+${attack.abilityBonus}` : attack.abilityBonus}`
+    : "";
+
+  return (
+    <View>
+      <Pressable onPress={() => setWeaponOpen(true)} style={styles.weaponRow}>
+        <View style={styles.weaponIcon}>
+          <Ionicons name="flash" size={16} color={colors.accent} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text variant="subtitle" style={{ fontSize: 15 }}>{weapon.name}</Text>
+          <Text variant="caption">
+            {weapon.damageDice ? `${weapon.damageDice} ${weapon.damageType}` : weapon.description}
+            {"  ·  "}
+            Ataque d20 {formatMod(attack.attackBonus)}
+            {"  ·  "}
+            Daño {formatMod(attack.abilityBonus)} {attack.abilityLabel}
+          </Text>
+        </View>
+        {!!damageNotation && (
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation();
+              roll(damageNotation, `${weapon.name} · ${damageNotation}`);
+            }}
+            style={styles.weaponRollBtn}
+          >
+            <Ionicons name="dice" size={16} color={colors.text} />
+            <Text style={styles.weaponRollText}>{damageNotation}</Text>
+          </Pressable>
+        )}
+        <Ionicons name="chevron-forward" size={15} color={colors.textFaint} />
+      </Pressable>
+      <WeaponModal
+        visible={weaponOpen}
+        weapon={character.weapon}
+        onClose={() => setWeaponOpen(false)}
+        onSave={(w) => update({ weapon: w })}
+      />
+    </View>
+  );
+}
+
+/* ---------- Inventario (monedas + notas) ---------- */
+export function InventorySection({ character, update }: { character: Character; update: UpdateFn }) {
+  const [notes, setNotes] = useState(character.notes || "");
+
+  useEffect(() => setNotes(character.notes || ""), [character.notes]);
+
+  return (
+    <View style={{ gap: 16 }}>
+      <View>
+        <Text variant="label" style={{ marginBottom: 8 }}>MONEDAS</Text>
+        <CurrencySection character={character} update={update} />
+      </View>
+
+      <View style={styles.divider} />
+
+      <View>
+        <Text variant="label" style={{ marginBottom: 8 }}>NOTAS</Text>
+        <TextInput
+          multiline
+          value={notes}
+          onChangeText={setNotes}
+          onBlur={() => update({ notes })}
+          placeholder="Objetos, aliados, pistas, lo que quieras anotar..."
+          placeholderTextColor={colors.textFaint}
+          style={styles.notesInput}
+        />
+      </View>
+
+    </View>
+  );
+}
 
 export function CurrencySection({ character, update }: { character: Character; update: UpdateFn }) {
   const change = (key: keyof Character["currency"], delta: number) => {
@@ -92,31 +177,6 @@ export function SkillsSection({
               </Text>
               <Text style={styles.skillMod}>{formatMod(mod)}</Text>
             </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
-/* ---------- Salvaciones ---------- */
-export function SavesSection({ character, cls }: { character: Character; cls: Clazz }) {
-  return (
-    <View style={{ gap: 6 }}>
-      <Text variant="caption" style={{ marginBottom: 4 }}>
-        Las resaltadas son en las que tu clase es competente (más fáciles de pasar).
-      </Text>
-      <View style={styles.saveGrid}>
-        {ABILITY_ORDER.map((ability) => {
-          const proficient = cls.savingThrows?.includes(ability);
-          const mod = saveModifier(ability, character, cls);
-          return (
-            <View key={ability} style={[styles.saveCell, proficient && styles.saveCellProf]}>
-              <Text variant="caption" color={proficient ? colors.accent : colors.textFaint}>
-                {ABILITY_FULL[ability]}
-              </Text>
-              <Text style={[styles.saveMod, proficient && { color: colors.accent }]}>{formatMod(mod)}</Text>
-            </View>
           );
         })}
       </View>
@@ -290,6 +350,47 @@ function StepBtn({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMa
 }
 
 const styles = StyleSheet.create({
+  weaponRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  weaponIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  weaponRollBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: colors.primary,
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  weaponRollText: { fontFamily: font.bodyBold, fontSize: 12, color: colors.text },
+  divider: { height: 1, backgroundColor: colors.border },
+  notesInput: {
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 12,
+    minHeight: 90,
+    textAlignVertical: "top",
+    color: colors.text,
+    fontFamily: font.body,
+    fontSize: 14,
+  },
   coinRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   coinDot: { width: 16, height: 16, borderRadius: 8 },
   coinValue: { fontFamily: font.display, fontSize: 18, color: colors.text, minWidth: 42, textAlign: "center" },
@@ -306,19 +407,6 @@ const styles = StyleSheet.create({
   },
   skillRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8 },
   skillMod: { fontFamily: font.display, fontSize: 16, color: colors.accent, minWidth: 34, textAlign: "right" },
-  saveGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "space-between" },
-  saveCell: {
-    width: "31%",
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.md,
-    paddingVertical: 10,
-    alignItems: "center",
-    gap: 2,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  saveCellProf: { borderColor: colors.accent },
-  saveMod: { fontFamily: font.display, fontSize: 18, color: colors.text },
   featureRow: { backgroundColor: colors.surfaceAlt, borderRadius: radius.md, padding: 12 },
   lvlTag: { backgroundColor: colors.primary, paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.sm },
   infoResource: { flexDirection: "row", alignItems: "center", gap: 12 },

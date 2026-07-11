@@ -8,11 +8,11 @@ vean su vida y stats, suban de nivel, tiren dados y usen un **turn tracker compa
 Consume el backend `dnd-mongo-backend`.
 
 ## Stack
-- **Expo SDK 52** + **expo-router** (navegación basada en archivos, carpeta `app/`)
+- **Expo SDK 54** (React 19, React Native 0.81, Reanimated 4) + **expo-router** (carpeta `app/`)
 - **TypeScript** (paths `@/*` → `src/*`)
 - **@tanstack/react-query** (datos del backend + polling del tracker)
 - **zustand** (sesión/auth) + **expo-secure-store** (token persistido)
-- **moti** + **react-native-reanimated** (animaciones), **expo-haptics** (vibración)
+- **moti** + **react-native-reanimated 4** (+ `react-native-worklets`, peer de reanimated 4), **expo-haptics**
 - **expo-linear-gradient**, **@expo/vector-icons** (Ionicons)
 - Fuentes: **Cinzel** (títulos) e **Inter** (cuerpo) vía `@expo-google-fonts`
 
@@ -29,8 +29,9 @@ app/                       # rutas (expo-router)
     tracker.tsx            # turn tracker (polling 3s)
     profile.tsx
   character/
-    new.tsx                # wizard: raza -> clase -> nombre
-    [id].tsx               # ficha: HP, stats, subir de nivel, hechizos
+    new.tsx                # wizard: raza -> clase -> características (4d6, reroll) -> nombre
+    [id].tsx               # ficha: HP/stats/CA/iniciativa editables, DC salvación, hechizos conocidos
+  spells/[id].tsx          # gestionar hechizos conocidos (todos los de la clase, por nivel)
 src/
   theme.ts                 # paleta y tokens de diseño
   api/client.ts            # fetch wrapper (token, {data}/{error})

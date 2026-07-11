@@ -5,6 +5,7 @@ import { api } from "./client";
 export interface RaceTrait {
   name: string;
   description: string;
+  active: boolean;
 }
 
 export interface Race {
@@ -13,6 +14,7 @@ export interface Race {
   name: string;
   description: string;
   image: string;
+  imageBase64: string;
   size: string;
   speed: number;
   abilityBonuses: { ability: string; bonus: number }[];
@@ -23,6 +25,7 @@ export interface Race {
 export interface ClassFeature {
   name: string;
   description: string;
+  active: boolean;
 }
 
 export interface ClassResource {
@@ -74,6 +77,7 @@ export interface Spell {
   savingThrow: string;
   simpleDescription: string;
   dice: string;
+  recommended?: boolean; // viene en GET /spells?classId= (para la pantalla de gestionar)
 }
 
 export interface AbilityScores {
@@ -112,6 +116,12 @@ export interface Character {
   currency: Currency;
   spellSlotsUsed: number[];
   resourcesUsed: ResourceState[];
+  knownSpells: Spell[];
+  armor: string;
+  shield: boolean;
+  acBonus: number;
+  initiativeBonus: number;
+  weapon: string;
   notes: string;
   raceId: Race | string;
   classId: Clazz | string;
@@ -123,6 +133,7 @@ export interface Participant {
   type: "player" | "monster";
   initiative: number;
   hp: number;
+  tempHp: number;
   maxHp: number;
   ac: number;
   characterId?: string;
@@ -178,7 +189,10 @@ export const useUpdateCharacter = (id: string) => {
     onMutate: async (patch) => {
       await qc.cancelQueries({ queryKey: ["character", id] });
       const prev = qc.getQueryData<Character>(["character", id]);
-      if (prev) qc.setQueryData<Character>(["character", id], { ...prev, ...patch });
+      // `knownSpells` se manda como array de ids (string) al backend, pero en cache son objetos
+      // Spell populados. No lo mezclamos optimistamente para no romper la forma; onSettled refetchea.
+      const { knownSpells, ...optimisticPatch } = patch;
+      if (prev) qc.setQueryData<Character>(["character", id], { ...prev, ...optimisticPatch });
       return { prev };
     },
     onError: (_e, _patch, ctx) => {
@@ -187,6 +201,7 @@ export const useUpdateCharacter = (id: string) => {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ["character", id] });
       qc.invalidateQueries({ queryKey: ["characters"] });
+      qc.invalidateQueries({ queryKey: ["tracker"] });
     },
   });
 };
@@ -199,6 +214,12 @@ export const useCreateCharacter = () => {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["characters"] }),
   });
 };
+
+/** Tira características para una clase (4d6 drop lowest, repartidas por clase). */
+export const useRollStats = () =>
+  useMutation({
+    mutationFn: (classId: string) => api<AbilityScores>("/characters/roll-stats", { method: "POST", body: { classId } }),
+  });
 
 export const useLevelUp = (id: string) => {
   const qc = useQueryClient();
@@ -222,6 +243,7 @@ export const useSetHp = (id: string) => {
     onSuccess: (data) => {
       qc.setQueryData<Character>(["character", id], (prev) => (prev ? { ...prev, currentHp: data.currentHp } : prev));
       qc.invalidateQueries({ queryKey: ["characters"] });
+      qc.invalidateQueries({ queryKey: ["tracker"] });
     },
   });
 };
@@ -249,7 +271,11 @@ const trackerMutation =
     const qc = useQueryClient();
     return useMutation({
       mutationFn: fn,
-      onSuccess: () => qc.invalidateQueries({ queryKey: ["tracker"] }),
+      onSuccess: () => {
+        qc.invalidateQueries({ queryKey: ["tracker"] });
+        qc.invalidateQueries({ queryKey: ["characters"] });
+        qc.invalidateQueries({ queryKey: ["character"] });
+      },
     });
   };
 
@@ -263,7 +289,7 @@ export const useTrackerAddMonster = trackerMutation<{
   ac?: number;
   initiative?: number;
 }>((v) => api("/tracker/participants", { method: "POST", body: v }));
-export const useTrackerPatch = trackerMutation<{ pid: string; hp?: number; initiative?: number }>(({ pid, ...body }) =>
+export const useTrackerPatch = trackerMutation<{ pid: string; hp?: number; tempHp?: number; initiative?: number }>(({ pid, ...body }) =>
   api(`/tracker/participants/${pid}`, { method: "PATCH", body })
 );
 export const useTrackerRemove = trackerMutation<string>((pid) =>
