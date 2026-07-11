@@ -1,0 +1,51 @@
+import { Pressable, StyleSheet, View } from "react-native";
+import { MotiView } from "moti";
+import * as Haptics from "expo-haptics";
+import { colors } from "@/theme";
+
+interface Props {
+  max: number;
+  used: number;
+  onChange: (used: number) => void;
+  color?: string;
+}
+
+/**
+ * Fila de "pips" (puntitos) para rastrear un recurso. Los gastados quedan apagados.
+ * Tocar un pip lleno lo gasta; tocar uno gastado lo recupera.
+ */
+export function Pips({ max, used, onChange, color = colors.accent }: Props) {
+  const handle = (index: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const available = max - used; // pips llenos (a la izquierda)
+    // index cuenta desde la izquierda; los primeros `available` están llenos.
+    if (index < available) onChange(used + (available - index)); // gasto hasta ese
+    else onChange(used - (index - available + 1)); // recupero hasta ese
+  };
+
+  return (
+    <View style={styles.row}>
+      {Array.from({ length: max }).map((_, i) => {
+        const filled = i < max - used;
+        return (
+          <Pressable key={i} onPress={() => handle(i)} hitSlop={6}>
+            <MotiView
+              animate={{
+                backgroundColor: filled ? color : "transparent",
+                borderColor: filled ? color : colors.muted,
+                scale: filled ? 1 : 0.9,
+              }}
+              transition={{ type: "timing", duration: 150 }}
+              style={styles.pip}
+            />
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  pip: { width: 22, height: 22, borderRadius: 11, borderWidth: 2 },
+});
