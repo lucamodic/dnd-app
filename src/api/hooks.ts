@@ -111,6 +111,7 @@ export interface UserSummary {
 export interface InventoryItem {
   _id?: string;
   text: string;
+  description?: string;
   createdAt?: string;
 }
 
@@ -132,7 +133,7 @@ export interface Character {
   currentHp: number;
   tempHp: number;
   hitDie: number;
-  ac: number;
+  ac?: number;
   proficiencyBonus: number;
   speed: number;
   abilityScores: AbilityScores;
@@ -146,6 +147,7 @@ export interface Character {
   acBonus: number;
   initiativeBonus: number;
   weapon: string;
+  weapons: string[];
   inventoryItems: InventoryItem[];
   notes: string;
   noteSections: NoteSections;
@@ -171,6 +173,7 @@ export interface Tracker {
   _id: string;
   round: number;
   activeIndex: number;
+  levelUpEnabled: boolean;
   participants: Participant[];
 }
 
@@ -329,6 +332,9 @@ export const useTrackerAddMonster = trackerMutation<{
 }>((v) => api("/tracker/participants", { method: "POST", body: v }));
 export const useTrackerPatch = trackerMutation<{ pid: string; hp?: number; tempHp?: number; initiative?: number }>(({ pid, ...body }) =>
   api(`/tracker/participants/${pid}`, { method: "PATCH", body })
+);
+export const useTrackerSettings = trackerMutation<{ levelUpEnabled?: boolean }>((body) =>
+  api("/tracker", { method: "PATCH", body })
 );
 export const useTrackerRemove = trackerMutation<string>((pid) =>
   api(`/tracker/participants/${pid}`, { method: "DELETE" })

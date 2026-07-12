@@ -21,13 +21,15 @@ import {
   useTrackerJoin,
   useTracker,
   useTrackerPatch,
+  useTrackerRemove,
+  useTrackerSettings,
   Character,
   Clazz,
   Participant,
   Race,
   Spell,
 } from "@/api/hooks";
-import { ABILITY_ORDER, ABILITY_FULL, abilityMod, classHighlightsAbility, formatMod, spellLevelLabel } from "@/lib/format";
+import { ABILITY_ORDER, ABILITY_FULL, ABILITY_DESCRIPTIONS, abilityMod, classHighlightsAbility, formatMod, spellLevelLabel } from "@/lib/format";
 import {
   featuresUpTo, resourcesCount, computeAc, spellSaveDC, spellAttackBonus, initiative, maxUnlockedSpellLevel, saveModifier,
 } from "@/lib/sheet";
@@ -52,12 +54,15 @@ export default function CharacterSheet() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data: character, isLoading } = useCharacter(id);
   const { data: tracker } = useTracker();
+  const user = useAuth((s) => s.user);
   const cls = character?.classId as Clazz | undefined;
   const race = character?.raceId as Race | undefined;
 
   const setHp = useSetHp(id);
   const updateChar = useUpdateCharacter(id);
   const join = useTrackerJoin();
+  const removeParticipant = useTrackerRemove();
+  const trackerSettings = useTrackerSettings();
   const [levelUpOpen, setLevelUpOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [joined, setJoined] = useState(false);
@@ -94,6 +99,10 @@ export default function CharacterSheet() {
   const classFeatureItems = allClassFeatures;
   const advancedInfoCount = raceTraitItems.length + classFeatureItems.length;
   const participants = tracker?.participants || [];
+  const trackerParticipant = participants.find((p) => p.characterId === character._id);
+  const inCombat = !!trackerParticipant;
+  const isDM = user?.role === "dm" || user?.role === "admin";
+  const canLevelUp = isDM || !!tracker?.levelUpEnabled;
 
   const pickCharacterImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -205,19 +214,35 @@ export default function CharacterSheet() {
       {/* Level up + Add to combat */}
       <View style={{ flexDirection: "row", gap: 10, marginTop: 14 }}>
         <View style={{ flex: 1 }}>
-          <Button label="Subir de nivel" icon="trending-up" onPress={() => setLevelUpOpen(true)} />
+          <Button
+            label="Subir de nivel"
+            icon="trending-up"
+            onPress={() => setLevelUpOpen(true)}
+            disabled={!canLevelUp}
+          />
         </View>
         <View style={{ flex: 1 }}>
           <Button
-            label={joined ? "En combate" : "Combatir"}
-            icon={joined ? "checkmark-circle" : "flash"}
+            label={inCombat ? "En combate" : "Combatir"}
+            icon={inCombat ? "checkmark-circle" : "flash"}
             variant="secondary"
             onPress={onJoin}
             loading={join.isPending}
-            disabled={joined}
+            disabled={inCombat}
           />
         </View>
       </View>
+      {isDM ? (
+        <Pressable
+          onPress={() => trackerSettings.mutate({ levelUpEnabled: !tracker?.levelUpEnabled })}
+          style={styles.levelGateRow}
+        >
+          <Ionicons name={tracker?.levelUpEnabled ? "checkbox" : "square-outline"} size={20} color={tracker?.levelUpEnabled ? colors.accent : colors.muted} />
+          <Text variant="caption" style={{ flex: 1 }}>Permitir que los players suban de nivel</Text>
+        </Pressable>
+      ) : !canLevelUp ? (
+        <Text variant="caption" center style={{ marginTop: 8 }}>El DM todavía no habilitó la subida de nivel.</Text>
+      ) : null}
 
       <HeroTabs active={tab} onChange={setTab} />
 
@@ -241,7 +266,7 @@ export default function CharacterSheet() {
               const highlighted = classHighlightsAbility(cls, key);
               return (
                 <MotiView key={key} from={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: "spring", damping: 14, delay: i * 45 }} style={{ width: "31%" }}>
-                  <Pressable onPress={() => setInfoModal({ title: ABILITY_FULL[key], body: `Modificador ${formatMod(abilityMod(score))}. Salvación ${cls ? formatMod(saveModifier(key, character, cls)) : formatMod(abilityMod(score))}. Tocá editar si querés cambiar el valor.` })} onLongPress={() => setAbilityEdit(key)} style={[styles.ability, highlighted && styles.abilityPrimary]}>
+                  <Pressable onPress={() => setInfoModal({ title: ABILITY_FULL[key], body: ABILITY_DESCRIPTIONS[key] })} onLongPress={() => setAbilityEdit(key)} style={[styles.ability, highlighted && styles.abilityPrimary]}>
                     <Text variant="caption">{ABILITY_FULL[key]}</Text>
                     <Text style={styles.abilityMod}>{formatMod(abilityMod(score))}</Text>
                     <Text variant="caption" color={colors.textFaint}>{score}</Text>
@@ -271,7 +296,7 @@ export default function CharacterSheet() {
         <>
           <View style={{ marginTop: 18 }}>
             <Text variant="label" style={{ marginBottom: 8 }}>ARMA</Text>
-            <WeaponSection character={character} cls={cls} update={updateChar.mutate} />
+            <WeaponSection character={character} cls={cls} race={race} update={updateChar.mutate} />
           </View>
           {resourcesCount(cls, character.level) > 0 && <Section title="Recursos" icon="battery-charging" defaultOpen><ResourcesSection character={character} cls={cls} update={updateChar.mutate} /></Section>}
           {cls.spellcasting && <Section title="Espacios de hechizos" icon="flame"><SpellSlotsSection character={character} cls={cls} update={updateChar.mutate} /></Section>}
@@ -297,6 +322,17 @@ export default function CharacterSheet() {
       {tab === "tracker" && (
         <Section title="Tracker" icon="list" defaultOpen>
           <Text variant="caption" style={{ marginBottom: 10 }}>Combate actual. Para administrar todo el combate, abrí la pestaña Combate.</Text>
+          {trackerParticipant && (
+            <Button
+              label="Salir del combate"
+              icon="exit-outline"
+              variant="secondary"
+              small
+              loading={removeParticipant.isPending}
+              onPress={() => removeParticipant.mutate(trackerParticipant._id)}
+              style={{ marginBottom: 10 }}
+            />
+          )}
           {participants.length === 0 ? (
             <Text variant="body">No hay nadie en combate todavía.</Text>
           ) : (
@@ -845,6 +881,18 @@ const styles = StyleSheet.create({
   hpBtn: { flex: 1, paddingVertical: 12, borderRadius: radius.md, alignItems: "center" },
   hpBtnDark: { backgroundColor: colors.primary },
   hpBtnLight: { backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
+  levelGateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 8,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
   heroTabs: {
     flexDirection: "row",
     gap: 6,

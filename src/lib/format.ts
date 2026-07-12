@@ -22,6 +22,15 @@ export const ABILITY_FULL: Record<keyof AbilityScores, string> = {
   cha: "Carisma",
 };
 
+export const ABILITY_DESCRIPTIONS: Record<keyof AbilityScores, string> = {
+  str: "Fuerza mide potencia física: levantar, empujar, romper, trepar, agarrar y pegar fuerte con armas cuerpo a cuerpo pesadas o normales.",
+  dex: "Destreza mide agilidad y precisión: esquivar, moverte rápido, hacer equilibrio, ser sigiloso, usar las manos con cuidado y atacar con armas a distancia o sutiles.",
+  con: "Constitución mide aguante físico: resistir venenos, cansancio, golpes, enfermedades y mantenerte de pie cuando el cuerpo está al límite.",
+  int: "Inteligencia mide conocimiento y razonamiento: recordar historia, entender magia, investigar pistas, analizar símbolos y resolver problemas con estudio.",
+  wis: "Sabiduría mide percepción e instinto: notar peligros, leer intenciones, orientarte, sobrevivir en la naturaleza y actuar con sentido común.",
+  cha: "Carisma mide presencia y fuerza de personalidad: convencer, intimidar, engañar, inspirar y canalizar magia basada en voluntad o poder personal.",
+};
+
 export const ABILITY_ORDER: (keyof AbilityScores)[] = ["str", "dex", "con", "int", "wis", "cha"];
 
 export const spellLevelLabel = (level: number): string =>

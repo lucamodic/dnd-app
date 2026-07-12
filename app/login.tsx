@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { KeyboardAvoidingView, Platform, StyleSheet, TextInput, View } from "react-native";
+import { RefObject, useRef, useState } from "react";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { router } from "expo-router";
 import { MotiView } from "moti";
 import { Ionicons } from "@expo/vector-icons";
@@ -12,6 +12,7 @@ import { colors, font, radius } from "@/theme";
 
 export default function Login() {
   const setSession = useAuth((s) => s.setSession);
+  const passwordRef = useRef<TextInput>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -38,82 +39,135 @@ export default function Login() {
   return (
     <Screen scroll={false}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.flex}
       >
-        <View style={styles.hero}>
-          <MotiView
-            from={{ opacity: 0, scale: 0.6, rotate: "-15deg" }}
-            animate={{ opacity: 1, scale: 1, rotate: "0deg" }}
-            transition={{ type: "spring", damping: 12 }}
-            style={styles.badge}
-          >
-            <Ionicons name="dice" size={44} color={colors.accent} />
-          </MotiView>
-          <Text variant="display" center style={{ marginTop: 18 }}>
-            Dragones{"\n"}& Principiantes
-          </Text>
-          <Text variant="body" center style={{ marginTop: 8 }}>
-            Creá tu héroe y viví la aventura
-          </Text>
-        </View>
-
-        <MotiView
-          from={{ opacity: 0, translateY: 20 }}
-          animate={{ opacity: 1, translateY: 0 }}
-          transition={{ type: "timing", duration: 400, delay: 150 }}
-          style={styles.form}
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <Field icon="person" placeholder="Usuario" value={username} onChange={setUsername} autoCap={false} />
-          <Field icon="lock-closed" placeholder="Contraseña" value={password} onChange={setPassword} secure />
-
-          {error && (
-            <Text color={colors.danger} center style={{ marginTop: 4 }}>
-              {error}
+          <View style={styles.hero}>
+            <MotiView
+              from={{ opacity: 0, scale: 0.6, rotate: "-15deg" }}
+              animate={{ opacity: 1, scale: 1, rotate: "0deg" }}
+              transition={{ type: "spring", damping: 12 }}
+              style={styles.badge}
+            >
+              <Ionicons name="dice" size={44} color={colors.accent} />
+            </MotiView>
+            <Text variant="display" center style={{ marginTop: 18 }}>
+              Dragones{"\n"}& Principiantes
             </Text>
-          )}
+            <Text variant="body" center style={{ marginTop: 8 }}>
+              Creá tu héroe y viví la aventura
+            </Text>
+          </View>
 
-          <Button label="Entrar" icon="log-in" onPress={onSubmit} loading={loading} style={{ marginTop: 8 }} />
-        </MotiView>
+          <MotiView
+            from={{ opacity: 0, translateY: 20 }}
+            animate={{ opacity: 1, translateY: 0 }}
+            transition={{ type: "timing", duration: 400, delay: 150 }}
+            style={styles.form}
+          >
+            <Field
+              icon="person"
+              placeholder="Usuario"
+              value={username}
+              onChange={setUsername}
+              autoCap={false}
+              returnKeyType="next"
+              textContentType="username"
+              autoComplete="username"
+              blurOnSubmit={false}
+              onSubmitEditing={() => passwordRef.current?.focus()}
+            />
+            <Field
+              inputRef={passwordRef}
+              icon="lock-closed"
+              placeholder="Contraseña"
+              value={password}
+              onChange={setPassword}
+              secure
+              returnKeyType="done"
+              textContentType="password"
+              autoComplete="password"
+              onSubmitEditing={onSubmit}
+            />
+
+            {error && (
+              <Text color={colors.danger} center style={{ marginTop: 4 }}>
+                {error}
+              </Text>
+            )}
+
+            <Button label="Entrar" icon="log-in" onPress={onSubmit} loading={loading} style={{ marginTop: 8 }} />
+          </MotiView>
+        </ScrollView>
       </KeyboardAvoidingView>
     </Screen>
   );
 }
 
 function Field({
+  inputRef,
   icon,
   placeholder,
   value,
   onChange,
   secure,
   autoCap = true,
+  returnKeyType,
+  textContentType,
+  autoComplete,
+  blurOnSubmit,
+  onSubmitEditing,
 }: {
+  inputRef?: RefObject<TextInput | null>;
   icon: keyof typeof Ionicons.glyphMap;
   placeholder: string;
   value: string;
   onChange: (v: string) => void;
   secure?: boolean;
   autoCap?: boolean;
+  returnKeyType?: "done" | "go" | "next" | "search" | "send";
+  textContentType?: "none" | "username" | "password";
+  autoComplete?: "off" | "username" | "password";
+  blurOnSubmit?: boolean;
+  onSubmitEditing?: () => void;
 }) {
+  const [visible, setVisible] = useState(false);
   return (
     <View style={styles.field}>
       <Ionicons name={icon} size={18} color={colors.muted} />
       <TextInput
+        ref={inputRef}
         placeholder={placeholder}
         placeholderTextColor={colors.textFaint}
         value={value}
         onChangeText={onChange}
-        secureTextEntry={secure}
+        secureTextEntry={secure && !visible}
         autoCapitalize={autoCap ? "sentences" : "none"}
+        autoComplete={autoComplete}
         autoCorrect={false}
+        blurOnSubmit={blurOnSubmit}
+        returnKeyType={returnKeyType}
+        textContentType={textContentType}
+        onSubmitEditing={onSubmitEditing}
         style={styles.input}
       />
+      {secure && (
+        <Pressable onPress={() => setVisible((v) => !v)} hitSlop={10} style={styles.eyeButton}>
+          <Ionicons name={visible ? "eye-off" : "eye"} size={20} color={colors.textFaint} />
+        </Pressable>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, justifyContent: "center" },
+  flex: { flex: 1 },
+  content: { flexGrow: 1, justifyContent: "center", paddingBottom: 28 },
   hero: { alignItems: "center", marginBottom: 40 },
   badge: {
     width: 96,
@@ -137,4 +191,5 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   input: { flex: 1, paddingVertical: 15, color: colors.text, fontFamily: font.body, fontSize: 15 },
+  eyeButton: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
 });

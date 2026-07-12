@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Pressable, StyleSheet, TextInput, View } from "react-native";
+import { Dimensions, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { MotiView, AnimatePresence } from "moti";
 import { Ionicons } from "@expo/vector-icons";
 import { Character, Clazz, Race, ClassResource } from "@/api/hooks";
@@ -13,8 +13,9 @@ import {
   weaponAttackInfo,
 } from "@/lib/sheet";
 import { ABILITY_LABELS, formatMod } from "@/lib/format";
-import { WEAPON_BY_INDEX } from "@/data/weapons";
+import { naturalWeaponIndexesForRace, WEAPON_BY_INDEX } from "@/data/weapons";
 import { Text } from "@/components/Text";
+import { Button } from "@/components/Button";
 import { useDice } from "@/components/dice/DiceProvider";
 import { Pips } from "./Pips";
 import { WeaponModal } from "./editors";
@@ -30,11 +31,13 @@ const COINS: { key: keyof Character["currency"]; label: string; color: string }[
 ];
 
 /* ---------- Arma equipada ---------- */
-export function WeaponSection({ character, cls, update }: { character: Character; cls: Clazz; update: UpdateFn }) {
+export function WeaponSection({ character, cls, race, update }: { character: Character; cls: Clazz; race?: Race; update: UpdateFn }) {
   const weapon = WEAPON_BY_INDEX[character.weapon] || WEAPON_BY_INDEX["unarmed"];
   const needsWeapon = !character.weapon || character.weapon === "unarmed";
   const [weaponOpen, setWeaponOpen] = useState(false);
   const { roll } = useDice();
+  const naturalWeapons = naturalWeaponIndexesForRace(race);
+  const ownedWeapons = Array.from(new Set([...(character.weapons || []), ...naturalWeapons, character.weapon].filter(Boolean)));
   const attack = weaponAttackInfo(character, weapon);
   const damageNotation = weapon.damageDice && weapon.damageDice.includes("d")
     ? `${weapon.damageDice}${attack.abilityBonus >= 0 ? `+${attack.abilityBonus}` : attack.abilityBonus}`
@@ -48,54 +51,109 @@ export function WeaponSection({ character, cls, update }: { character: Character
           <Text variant="caption" color={colors.warning}>Seleccioná un arma para calcular bien ataque y daño.</Text>
         </View>
       )}
-      <Pressable onPress={() => setWeaponOpen(true)} style={[styles.weaponRow, needsWeapon && styles.weaponRowWarning]}>
-        <View style={styles.weaponIcon}>
-          <Ionicons name="flash" size={16} color={colors.accent} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text variant="subtitle" style={{ fontSize: 15 }}>{weapon.name}</Text>
-          <Text variant="caption">
-            {weapon.damageDice ? `${weapon.damageDice} ${weapon.damageType}` : weapon.description}
-            {"  ·  "}
-            Ataque d20 {formatMod(attack.attackBonus)}
-            {"  ·  "}
-            Daño {formatMod(attack.abilityBonus)} {attack.abilityLabel}
-          </Text>
-        </View>
-        {!!damageNotation && (
-          <Pressable
-            onPress={(e) => {
-              e.stopPropagation();
-              roll(damageNotation, `${weapon.name} · ${damageNotation}`);
-            }}
-            style={styles.weaponRollBtn}
-          >
-            <Ionicons name="dice" size={16} color={colors.text} />
-            <Text style={styles.weaponRollText}>{damageNotation}</Text>
-          </Pressable>
-        )}
-        <Ionicons name="chevron-forward" size={15} color={colors.textFaint} />
-      </Pressable>
+      <View style={{ gap: 8 }}>
+        {ownedWeapons.length === 0 && <WeaponCard weaponIndex="unarmed" character={character} active roll={roll} />}
+        {ownedWeapons.map((weaponIndex) => (
+          <WeaponCard
+            key={weaponIndex}
+            weaponIndex={weaponIndex}
+            character={character}
+            active={weaponIndex === character.weapon}
+            natural={naturalWeapons.includes(weaponIndex)}
+            roll={roll}
+            onEquip={() => update({ weapon: weaponIndex })}
+            onRemove={
+              naturalWeapons.includes(weaponIndex) || weaponIndex === character.weapon
+                ? undefined
+                : () => update({ weapons: ownedWeapons.filter((w) => w !== weaponIndex && !naturalWeapons.includes(w)) })
+            }
+          />
+        ))}
+      </View>
+      <Button label="Sumar arma" icon="add-circle" variant="secondary" small onPress={() => setWeaponOpen(true)} style={{ marginTop: 10 }} />
       <WeaponModal
         visible={weaponOpen}
         weapon={character.weapon}
         onClose={() => setWeaponOpen(false)}
-        onSave={(w) => update({ weapon: w })}
+        onSave={(w) => update({ weapon: w, weapons: Array.from(new Set([...(character.weapons || []), w])) })}
       />
     </View>
   );
 }
 
+function WeaponCard({
+  weaponIndex,
+  character,
+  active,
+  natural,
+  roll,
+  onEquip,
+  onRemove,
+}: {
+  weaponIndex: string;
+  character: Character;
+  active?: boolean;
+  natural?: boolean;
+  roll: (notation: string, label?: string) => void;
+  onEquip?: () => void;
+  onRemove?: () => void;
+}) {
+  const weapon = WEAPON_BY_INDEX[weaponIndex] || WEAPON_BY_INDEX["unarmed"];
+  const attack = weaponAttackInfo(character, weapon);
+  const damageNotation = weapon.damageDice && weapon.damageDice.includes("d")
+    ? `${weapon.damageDice}${attack.abilityBonus >= 0 ? `+${attack.abilityBonus}` : attack.abilityBonus}`
+    : "";
+  return (
+    <Pressable onPress={onEquip} disabled={!onEquip} style={[styles.weaponRow, active && styles.weaponRowActive]}>
+      <View style={styles.weaponIcon}>
+        <Ionicons name={natural ? "sparkles" : "flash"} size={16} color={colors.accent} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text variant="subtitle" style={{ fontSize: 15 }}>{weapon.name}</Text>
+        <Text variant="caption">
+          {weapon.damageDice ? `${weapon.damageDice} ${weapon.damageType}` : weapon.description}
+          {"  ·  "}
+          Ataque d20 {formatMod(attack.attackBonus)}
+          {"  ·  "}
+          Daño {formatMod(attack.abilityBonus)} {attack.abilityLabel}
+        </Text>
+        {natural && <Text variant="caption" color={colors.accent}>Racial</Text>}
+      </View>
+      {!!damageNotation && (
+        <Pressable
+          onPress={(e) => {
+            e.stopPropagation();
+            roll(damageNotation, `${weapon.name} · ${damageNotation}`);
+          }}
+          style={styles.weaponRollBtn}
+        >
+          <Ionicons name="dice" size={16} color={colors.text} />
+          <Text style={styles.weaponRollText}>{damageNotation}</Text>
+        </Pressable>
+      )}
+      {onRemove && (
+        <Pressable onPress={onRemove} hitSlop={8}>
+          <Ionicons name="close" size={16} color={colors.textFaint} />
+        </Pressable>
+      )}
+    </Pressable>
+  );
+}
+
 /* ---------- Inventario (monedas + notas) ---------- */
 export function InventorySection({ character, update }: { character: Character; update: UpdateFn }) {
-  const [item, setItem] = useState("");
+  const [itemOpen, setItemOpen] = useState(false);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const items = character.inventoryItems || [];
 
-  const addItem = () => {
-    const text = item.trim();
+  const saveItem = (text: string, description: string) => {
     if (!text) return;
-    update({ inventoryItems: [...items, { text, createdAt: new Date().toISOString() }] });
-    setItem("");
+    const next = [...items];
+    if (editingIndex !== null) next[editingIndex] = { ...next[editingIndex], text, description };
+    else next.push({ text, description, createdAt: new Date().toISOString() });
+    update({ inventoryItems: next });
+    setEditingIndex(null);
+    setItemOpen(false);
   };
 
   return (
@@ -109,30 +167,105 @@ export function InventorySection({ character, update }: { character: Character; 
 
       <View>
         <Text variant="label" style={{ marginBottom: 8 }}>ÍTEMS</Text>
-        <View style={styles.itemAddRow}>
-          <TextInput
-            value={item}
-            onChangeText={setItem}
-            placeholder="Agregar ítem..."
-            placeholderTextColor={colors.textFaint}
-            style={styles.itemInput}
-          />
-          <StepBtn icon="add" onPress={addItem} />
-        </View>
+        <Button label="Agregar ítem" icon="add-circle" variant="secondary" small onPress={() => { setEditingIndex(null); setItemOpen(true); }} />
         <View style={{ gap: 6, marginTop: 10 }}>
           {items.length === 0 && <Text variant="caption">Todavía no agregaste ítems.</Text>}
           {items.map((it, i) => (
-            <View key={it._id || `${it.text}-${i}`} style={styles.itemRow}>
-              <Text variant="body" style={{ flex: 1, fontSize: 14 }}>{it.text}</Text>
-              <Pressable onPress={() => update({ inventoryItems: items.filter((_, idx) => idx !== i) })}>
-                <Ionicons name="close" size={16} color={colors.textFaint} />
-              </Pressable>
-            </View>
+            <ItemRow
+              key={it._id || `${it.text}-${i}`}
+              item={it}
+              onEdit={() => { setEditingIndex(i); setItemOpen(true); }}
+              onRemove={() => update({ inventoryItems: items.filter((_, idx) => idx !== i) })}
+            />
           ))}
         </View>
+        <ItemModal
+          visible={itemOpen}
+          item={editingIndex !== null ? items[editingIndex] : undefined}
+          onClose={() => { setEditingIndex(null); setItemOpen(false); }}
+          onSave={saveItem}
+        />
       </View>
 
     </View>
+  );
+}
+
+function ItemRow({ item, onEdit, onRemove }: { item: Character["inventoryItems"][number]; onEdit: () => void; onRemove: () => void }) {
+  const [open, setOpen] = useState(false);
+  const hasDescription = !!item.description?.trim();
+  return (
+    <View style={styles.itemRow}>
+      <Pressable onPress={() => hasDescription && setOpen((v) => !v)} style={{ flex: 1 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Text variant="body" style={{ flex: 1, fontSize: 14 }}>{item.text}</Text>
+          {hasDescription && <Ionicons name={open ? "chevron-up" : "chevron-down"} size={14} color={colors.textFaint} />}
+        </View>
+        <AnimatePresence>
+          {open && (
+            <MotiView from={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" as any }} exit={{ opacity: 0, height: 0 }}>
+              <Text variant="caption" style={{ marginTop: 6 }}>{item.description}</Text>
+            </MotiView>
+          )}
+        </AnimatePresence>
+      </Pressable>
+      <Pressable onPress={onEdit} hitSlop={8}>
+        <Ionicons name="create-outline" size={16} color={colors.textFaint} />
+      </Pressable>
+      <Pressable onPress={onRemove} hitSlop={8}>
+        <Ionicons name="close" size={16} color={colors.textFaint} />
+      </Pressable>
+    </View>
+  );
+}
+
+function ItemModal({
+  visible,
+  item,
+  onClose,
+  onSave,
+}: {
+  visible: boolean;
+  item?: Character["inventoryItems"][number];
+  onClose: () => void;
+  onSave: (text: string, description: string) => void;
+}) {
+  const [text, setText] = useState("");
+  const [description, setDescription] = useState("");
+  useEffect(() => {
+    if (visible) {
+      setText(item?.text || "");
+      setDescription(item?.description || "");
+    }
+  }, [visible, item]);
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.sheetBackdrop}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} />
+        <View style={styles.itemSheet}>
+          <View style={styles.handle} />
+          <Text variant="title">{item ? "Editar ítem" : "Agregar ítem"}</Text>
+          <TextInput
+            value={text}
+            onChangeText={setText}
+            placeholder="Nombre del ítem"
+            placeholderTextColor={colors.textFaint}
+            style={styles.itemInput}
+            returnKeyType="next"
+          />
+          <TextInput
+            value={description}
+            onChangeText={setDescription}
+            placeholder="Descripción opcional"
+            placeholderTextColor={colors.textFaint}
+            style={[styles.itemInput, styles.itemDescriptionInput]}
+            multiline
+            textAlignVertical="top"
+          />
+          <Button label="Guardar" icon="checkmark" onPress={() => onSave(text.trim(), description.trim())} disabled={!text.trim()} />
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
@@ -152,11 +285,24 @@ export function NotesSection({ character, update }: { character: Character; upda
 
   return (
     <View style={{ gap: 12, marginTop: 14 }}>
-      <NoteBox title="Generales" value={notes.general} onChange={(v) => save("general", v)} />
-      <NoteBox title="Campaña" value={notes.campaign} onChange={(v) => save("campaign", v)} />
-      <NoteBox title="NPCs" value={notes.npcs} onChange={(v) => save("npcs", v)} />
-      <NoteBox title="Lugares" value={notes.places} onChange={(v) => save("places", v)} />
-      <NoteBox title="Otros" value={notes.other} onChange={(v) => save("other", v)} />
+      <ScrollView
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={(e) => setPage(Math.round(e.nativeEvent.contentOffset.x / width))}
+      >
+        {tabs.map(([key, title]) => (
+          <View key={key} style={{ width }}>
+            <NoteBox title={title} value={notes[key]} onChange={(v) => save(key, v)} />
+          </View>
+        ))}
+      </ScrollView>
+      <View style={styles.noteDots}>
+        {tabs.map(([, title], i) => (
+          <View key={title} style={[styles.noteDot, i === page && styles.noteDotActive]} />
+        ))}
+      </View>
+      <Text variant="caption" center>{tabs[page]?.[1]}</Text>
     </View>
   );
 }
@@ -218,6 +364,7 @@ export function SkillsSection({
     const next = current.includes(index) ? current.filter((s) => s !== index) : [...current, index];
     update({ skillProficiencies: next });
   };
+  const sortedSkills = [...SKILLS].sort((a, b) => a.label.localeCompare(b.label, "es"));
 
   return (
     <View>
@@ -226,7 +373,7 @@ export function SkillsSection({
         (suma tu bono de +{character.proficiencyBonus}).
       </Text>
       <View style={{ gap: 2 }}>
-        {SKILLS.map((skill) => {
+        {sortedSkills.map((skill) => {
           const proficient = character.skillProficiencies?.includes(skill.index);
           const mod = skillModifier(skill, character);
           const suggested = cls.skillOptions?.includes(skill.index);
@@ -429,6 +576,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  weaponRowActive: { borderColor: colors.accent, backgroundColor: colors.primary + "44" },
   weaponIcon: {
     width: 34,
     height: 34,
@@ -467,7 +615,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     padding: 12,
-    minHeight: 90,
+    minHeight: 260,
     textAlignVertical: "top",
     color: colors.text,
     fontFamily: font.body,
@@ -496,6 +644,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
+  itemSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    padding: 20,
+    paddingBottom: 34,
+    gap: 12,
+    borderTopWidth: 1,
+    borderColor: colors.border,
+  },
+  handle: { alignSelf: "center", width: 42, height: 5, borderRadius: 3, backgroundColor: colors.muted, marginBottom: 4 },
+  sheetBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
+  itemDescriptionInput: { minHeight: 110, paddingTop: 12 },
+  noteDots: { flexDirection: "row", justifyContent: "center", gap: 6 },
+  noteDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.surfaceAlt },
+  noteDotActive: { width: 20, backgroundColor: colors.accent },
   coinRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   coinDot: { width: 16, height: 16, borderRadius: 8 },
   coinValue: { fontFamily: font.display, fontSize: 18, color: colors.text, minWidth: 42, textAlign: "center" },
@@ -517,3 +681,12 @@ const styles = StyleSheet.create({
   infoResource: { flexDirection: "row", alignItems: "center", gap: 12 },
   infoValue: { fontFamily: font.display, fontSize: 22, color: colors.accent },
 });
+  const [page, setPage] = useState(0);
+  const width = Dimensions.get("window").width - 40;
+  const tabs = [
+    ["general", "Generales"],
+    ["campaign", "Campaña"],
+    ["npcs", "NPCs"],
+    ["places", "Lugares"],
+    ["other", "Otros"],
+  ] as const;

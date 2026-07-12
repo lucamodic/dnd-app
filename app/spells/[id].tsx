@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import { router, useLocalSearchParams, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { AnimatePresence, MotiView } from "moti";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import { Card } from "@/components/Card";
@@ -31,6 +32,7 @@ export default function ManageSpells() {
   const [seeded, setSeeded] = useState(false);
   const [flashId, setFlashId] = useState<string | null>(null);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const [openIds, setOpenIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!seeded && character?.knownSpells) {
@@ -141,31 +143,68 @@ export default function ManageSpells() {
             const flashing = flashId === spell._id;
             const pending = pendingIds.has(spell._id);
             return (
-              <Pressable key={spell._id} onPress={() => toggle(spell, locked)} disabled={locked}>
+              <Pressable
+                key={spell._id}
+                onPress={() => setOpenIds((cur) => {
+                  const next = new Set(cur);
+                  if (next.has(spell._id)) next.delete(spell._id);
+                  else next.add(spell._id);
+                  return next;
+                })}
+              >
                 <Card style={[styles.row, (atLimit && !known) && { opacity: 0.6 }, flashing && styles.rowFlash]}>
-                  {pending ? (
-                    <ActivityIndicator color={colors.accent} />
-                  ) : (
-                    <Ionicons
-                      name={known ? "checkmark-circle" : "ellipse-outline"}
-                      size={22}
-                      color={known ? colors.accent : colors.muted}
-                    />
-                  )}
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <Text variant="subtitle" style={{ fontSize: 15 }}>{spell.name}</Text>
-                      {spell.recommended && <Ionicons name="star" size={13} color={colors.warning} />}
+                  <View style={styles.spellHeader}>
+                    <Pressable onPress={(e) => { e.stopPropagation(); toggle(spell, locked); }} disabled={locked} hitSlop={8}>
+                      {pending ? (
+                        <ActivityIndicator color={colors.accent} />
+                      ) : (
+                        <Ionicons
+                          name={known ? "checkmark-circle" : "ellipse-outline"}
+                          size={22}
+                          color={known ? colors.accent : colors.muted}
+                        />
+                      )}
+                    </Pressable>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                        <Text variant="subtitle" style={{ fontSize: 15 }}>{spell.name}</Text>
+                        {spell.recommended && <Ionicons name="star" size={13} color={colors.warning} />}
+                      </View>
+                      <Text variant="caption" numberOfLines={1}>
+                        {locked ? "Se desbloquea al subir de nivel" : spell.simpleDescription || spell.school}
+                      </Text>
                     </View>
-                    <Text variant="caption" numberOfLines={1}>
-                      {locked ? "Se desbloquea al subir de nivel" : spell.simpleDescription || spell.school}
-                    </Text>
+                    {!!spell.dice && !locked && (
+                      <View style={styles.dice}>
+                        <Text style={{ fontFamily: font.bodyBold, fontSize: 12, color: colors.text }}>{spell.dice}</Text>
+                      </View>
+                    )}
+                    <Ionicons name={openIds.has(spell._id) ? "chevron-up" : "chevron-down"} size={16} color={colors.textFaint} />
                   </View>
-                  {!!spell.dice && !locked && (
-                    <View style={styles.dice}>
-                      <Text style={{ fontFamily: font.bodyBold, fontSize: 12, color: colors.text }}>{spell.dice}</Text>
-                    </View>
-                  )}
+                  <AnimatePresence>
+                    {openIds.has(spell._id) && (
+                      <MotiView
+                        from={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" as any }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ type: "timing", duration: 180 }}
+                      >
+                        <Text variant="body" style={{ marginTop: 10, fontSize: 14 }}>
+                          {spell.simpleDescription || spell.description?.join("\n\n") || "Sin descripción todavía."}
+                        </Text>
+                        <View style={styles.infoGrid}>
+                          <InfoPill icon="color-palette" label={spell.school} />
+                          <InfoPill icon="time" label={spell.castingTime} />
+                          <InfoPill icon="navigate" label={spell.range} />
+                          <InfoPill icon="hourglass" label={spell.duration} />
+                          {spell.concentration && <InfoPill icon="eye" label="Concentración" />}
+                          {spell.ritual && <InfoPill icon="book" label="Ritual" />}
+                          {!!spell.damageType && <InfoPill icon="flame" label={`Daño: ${spell.damageType}`} />}
+                          {!!spell.savingThrow && <InfoPill icon="shield-checkmark" label={`Salvación: ${spell.savingThrow}`} />}
+                        </View>
+                      </MotiView>
+                    )}
+                  </AnimatePresence>
                   {locked && (
                     <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
                       <View style={styles.lockOverlay} />
@@ -178,6 +217,16 @@ export default function ManageSpells() {
         </View>
       ))}
     </Screen>
+  );
+}
+
+function InfoPill({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label?: string }) {
+  if (!label) return null;
+  return (
+    <View style={styles.infoPill}>
+      <Ionicons name={icon} size={12} color={colors.accent} />
+      <Text variant="caption" color={colors.textDim}>{label}</Text>
+    </View>
   );
 }
 
@@ -195,7 +244,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  row: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 8, paddingVertical: 12, overflow: "hidden" },
+  row: { marginBottom: 8, paddingVertical: 12, overflow: "hidden" },
+  spellHeader: { flexDirection: "row", alignItems: "center", gap: 12 },
   rowFlash: { borderColor: colors.danger, borderWidth: 1.5 },
   dice: {
     backgroundColor: colors.primary,
@@ -207,5 +257,17 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.45)",
     borderRadius: radius.lg,
+  },
+  infoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
+  infoPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
 });

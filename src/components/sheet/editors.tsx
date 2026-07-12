@@ -209,7 +209,7 @@ export function WeaponModal({
                 <Text variant="label" style={{ marginTop: 8, marginBottom: 4 }}>
                   {WEAPON_CATEGORY_LABEL[cat].toUpperCase()}
                 </Text>
-                {WEAPONS.filter((w) => w.category === cat && w.index !== "unarmed").map((w) => {
+                {WEAPONS.filter((w) => w.category === cat && w.index !== "unarmed" && !w.properties.includes("Natural") && !w.properties.includes("Racial")).map((w) => {
                   const active = sel === w.index;
                   return (
                     <Pressable key={w.index} onPress={() => setSel(w.index)} style={[styles.armorRow, active && styles.armorRowActive]}>
