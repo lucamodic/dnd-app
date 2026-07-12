@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { MotiView, AnimatePresence } from "moti";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import { Card } from "@/components/Card";
@@ -18,12 +19,15 @@ import {
   useUpdateCharacter,
   useDeleteCharacter,
   useTrackerJoin,
+  useTracker,
+  useTrackerPatch,
   Character,
   Clazz,
+  Participant,
   Race,
   Spell,
 } from "@/api/hooks";
-import { ABILITY_ORDER, ABILITY_LABELS, ABILITY_FULL, abilityMod, formatMod, spellLevelLabel } from "@/lib/format";
+import { ABILITY_ORDER, ABILITY_FULL, abilityMod, classHighlightsAbility, formatMod, spellLevelLabel } from "@/lib/format";
 import {
   featuresUpTo, resourcesCount, computeAc, spellSaveDC, spellAttackBonus, initiative, maxUnlockedSpellLevel, saveModifier,
 } from "@/lib/sheet";
@@ -39,12 +43,15 @@ import {
   FeatureList,
   ResourcesSection,
   SpellSlotsSection,
+  NotesSection,
 } from "@/components/sheet/sections";
+import { useAuth } from "@/store/auth";
 import { colors, font, radius, shadow } from "@/theme";
 
 export default function CharacterSheet() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data: character, isLoading } = useCharacter(id);
+  const { data: tracker } = useTracker();
   const cls = character?.classId as Clazz | undefined;
   const race = character?.raceId as Race | undefined;
 
@@ -59,6 +66,8 @@ export default function CharacterSheet() {
   const [armorOpen, setArmorOpen] = useState(false);
   const [initEditOpen, setInitEditOpen] = useState(false);
   const [abilityEdit, setAbilityEdit] = useState<keyof typeof ABILITY_FULL | null>(null);
+  const [infoModal, setInfoModal] = useState<{ title: string; body: string } | null>(null);
+  const [tab, setTab] = useState<"main" | "bag" | "combat" | "notes" | "tracker">("main");
 
   if (isLoading || !character) {
     return (
@@ -84,6 +93,23 @@ export default function CharacterSheet() {
   const raceTraitItems = race?.traits || [];
   const classFeatureItems = allClassFeatures;
   const advancedInfoCount = raceTraitItems.length + classFeatureItems.length;
+  const participants = tracker?.participants || [];
+
+  const pickCharacterImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.55,
+      base64: true,
+    });
+    if (!result.canceled && result.assets[0]?.base64) {
+      const mime = result.assets[0].mimeType || "image/jpeg";
+      updateChar.mutate({ imageBase64: `data:${mime};base64,${result.assets[0].base64}` });
+    }
+  };
 
   const changeHp = (delta: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -116,15 +142,20 @@ export default function CharacterSheet() {
       </View>
 
       <View style={{ alignItems: "center", marginTop: 8 }}>
-        <RaceImage
-          uri={race?.imageBase64 || race?.image}
-          style={styles.crest}
-          fallback={
-            <LinearGradient colors={[accent, colors.primary]} style={styles.crest}>
-              <ClassIcon index={cls?.index} size={38} color={colors.text} />
-            </LinearGradient>
-          }
-        />
+        <Pressable onPress={pickCharacterImage}>
+          <RaceImage
+            uri={character.imageBase64 || race?.imageBase64 || race?.image}
+            style={styles.crest}
+            fallback={
+              <LinearGradient colors={[accent, colors.primary]} style={styles.crest}>
+                <ClassIcon index={cls?.index} size={38} color={colors.text} />
+              </LinearGradient>
+            }
+          />
+          <View style={styles.photoEditBadge}>
+            <Ionicons name="camera" size={13} color={colors.text} />
+          </View>
+        </Pressable>
         <View style={styles.classBadge}>
           <LinearGradient colors={[accent, colors.primary]} style={styles.classBadgeInner}>
             <ClassIcon index={cls?.index} size={15} color={colors.text} />
@@ -178,7 +209,7 @@ export default function CharacterSheet() {
         </View>
         <View style={{ flex: 1 }}>
           <Button
-            label={joined ? "En combate" : "Sumarme"}
+            label={joined ? "En combate" : "Combatir"}
             icon={joined ? "checkmark-circle" : "flash"}
             variant="secondary"
             onPress={onJoin}
@@ -188,127 +219,100 @@ export default function CharacterSheet() {
         </View>
       </View>
 
-      {/* Quick stats */}
-      <View style={styles.quickRow}>
-        <QuickStat icon="shield" label="CA" value={ac} onPress={() => setArmorOpen(true)} />
-        <QuickStat icon="flash" label="Iniciativa" value={formatMod(init)} onPress={() => setInitEditOpen(true)} />
-        <QuickStat icon="walk" label="Vel" value={`${character.speed}`} />
-        {saveDC != null ? (
-          <QuickStat icon="color-wand" label="CD Salv." value={saveDC} />
-        ) : (
-          <QuickStat icon="ribbon" label="Comp" value={formatMod(character.proficiencyBonus)} />
-        )}
-      </View>
+      <HeroTabs active={tab} onChange={setTab} />
 
-      {/* Abilities */}
-      <Text variant="label" style={{ marginTop: 22, marginBottom: 10 }}>
-        CARACTERÍSTICAS
-      </Text>
-      <View style={styles.abilityGrid}>
-        {ABILITY_ORDER.map((key, i) => {
-          const score = character.abilityScores[key];
-          return (
-            <MotiView
-              key={key}
-              from={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ type: "spring", damping: 14, delay: i * 45 }}
-              style={{ width: "31%" }}
-            >
-              <Pressable onPress={() => setAbilityEdit(key)} style={styles.ability}>
-                <Text variant="caption">{ABILITY_LABELS[key]}</Text>
-                <Text style={styles.abilityMod}>{formatMod(abilityMod(score))}</Text>
-                <Text variant="caption" color={colors.textFaint}>{score}</Text>
-                {cls && (
-                  <Text
-                    variant="caption"
-                    color={cls.savingThrows?.includes(key) ? colors.accent : colors.textDim}
-                    style={{ marginTop: 2 }}
-                  >
-                    Salv {formatMod(saveModifier(key, character, cls))}
-                  </Text>
-                )}
-              </Pressable>
-            </MotiView>
-          );
-        })}
-      </View>
-
-      {/* Secciones de la ficha */}
-      <View style={{ marginTop: 12 }}>
-        <Section title="Inventario" icon="bag">
-          <InventorySection character={character} update={updateChar.mutate} />
-        </Section>
-
-        <Section title="Competencias" icon="ribbon">
-          <SkillsSection character={character} cls={cls!} update={updateChar.mutate} />
-        </Section>
-
-        {cls && resourcesCount(cls, character.level) > 0 && (
-          <Section title="Recursos" icon="battery-charging" defaultOpen>
-            <ResourcesSection character={character} cls={cls} update={updateChar.mutate} />
-          </Section>
-        )}
-      </View>
-
-      {cls && (
-        <View style={{ marginTop: 18 }}>
-          <Text variant="label" style={{ marginBottom: 8 }}>ARMA</Text>
-          <WeaponSection character={character} cls={cls} update={updateChar.mutate} />
-        </View>
-      )}
-
-      {/* Spells: solo los conocidos y desbloqueados a este nivel */}
-      {cls?.spellcasting && (
+      {tab === "main" && (
         <>
-          <Section title="Espacios de conjuro" icon="flame">
-            <SpellSlotsSection character={character} cls={cls} update={updateChar.mutate} />
-          </Section>
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 26, marginBottom: 4 }}>
-            <Text variant="label">MIS HECHIZOS</Text>
-            <Pressable onPress={() => router.push(`/spells/${id}`)} hitSlop={8} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-              <Ionicons name="options" size={14} color={colors.accent} />
-              <Text variant="caption" color={colors.accent}>Gestionar</Text>
-            </Pressable>
+          <View style={styles.quickRow}>
+            <QuickStat icon="shield" label="CA" value={ac} onPress={() => setArmorOpen(true)} onInfo={() => setInfoModal({ title: "Clase de Armadura", body: "La CA es el número que el enemigo tiene que igualar o superar para pegarte." })} />
+            <QuickStat icon="flash" label="Iniciativa" value={formatMod(init)} onPress={() => setInitEditOpen(true)} onInfo={() => setInfoModal({ title: "Iniciativa", body: "Se tira al empezar combate para decidir el orden de turnos." })} />
+            <QuickStat icon="walk" label="Velocidad" value={`${character.speed}`} onInfo={() => setInfoModal({ title: "Velocidad", body: "Cuántos pies puede moverse tu personaje en su turno." })} />
+            {saveDC != null ? (
+              <QuickStat icon="color-wand" label="CD Salv." value={saveDC} onInfo={() => setInfoModal({ title: "CD de salvación", body: "Es la dificultad que deben superar los enemigos cuando tus hechizos piden una salvación." })} />
+            ) : (
+              <QuickStat icon="ribbon" label="Competencia" value={formatMod(character.proficiencyBonus)} onInfo={() => setInfoModal({ title: "Competencia", body: "Bonus que sumás en cosas que tu personaje sabe hacer bien." })} />
+            )}
           </View>
-          <Text variant="caption" style={{ marginBottom: 10 }}>
-            Los que sabés usar ahora. Para pegar con un hechizo tirá d20
-            {spellAtk != null ? ` ${formatMod(spellAtk)}` : ""}. Tocá "Lanzar" para tirar los dados.
-          </Text>
-          {visibleSpells.map((s, i) => (
-            <SpellRow key={s._id} spell={s} delay={i * 25} character={character} update={updateChar.mutate} />
-          ))}
-          {visibleSpells.length === 0 && (
-            <Text variant="body">
-              No tenés hechizos elegidos para tu nivel. Tocá "Gestionar" para agregar.
-            </Text>
+
+          <Text variant="label" style={{ marginTop: 22, marginBottom: 10 }}>HABILIDADES</Text>
+          <View style={styles.abilityGrid}>
+            {ABILITY_ORDER.map((key, i) => {
+              const score = character.abilityScores[key];
+              const highlighted = classHighlightsAbility(cls, key);
+              return (
+                <MotiView key={key} from={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: "spring", damping: 14, delay: i * 45 }} style={{ width: "31%" }}>
+                  <Pressable onPress={() => setInfoModal({ title: ABILITY_FULL[key], body: `Modificador ${formatMod(abilityMod(score))}. Salvación ${cls ? formatMod(saveModifier(key, character, cls)) : formatMod(abilityMod(score))}. Tocá editar si querés cambiar el valor.` })} onLongPress={() => setAbilityEdit(key)} style={[styles.ability, highlighted && styles.abilityPrimary]}>
+                    <Text variant="caption">{ABILITY_FULL[key]}</Text>
+                    <Text style={styles.abilityMod}>{formatMod(abilityMod(score))}</Text>
+                    <Text variant="caption" color={colors.textFaint}>{score}</Text>
+                    {cls && <Text variant="caption" color={cls.savingThrows?.includes(key) ? colors.accent : colors.textDim} style={{ marginTop: 2 }}>Salv {formatMod(saveModifier(key, character, cls))}</Text>}
+                  </Pressable>
+                </MotiView>
+              );
+            })}
+          </View>
+
+          <Section title="Competencias" icon="ribbon">
+            <SkillsSection character={character} cls={cls!} update={updateChar.mutate} />
+          </Section>
+
+          {advancedInfoCount > 0 && (
+            <Section title="Información adicional" icon="information-circle" badge={`${advancedInfoCount}`}>
+              {raceTraitItems.length > 0 && <View style={{ gap: 8, marginBottom: classFeatureItems.length > 0 ? 14 : 0 }}><Text variant="label">RASGOS DE RAZA</Text><FeatureList items={raceTraitItems} /></View>}
+              {classFeatureItems.length > 0 && <View style={{ gap: 8 }}><Text variant="label">HABILIDADES DE CLASE</Text><FeatureList items={classFeatureItems} /></View>}
+            </Section>
           )}
         </>
       )}
 
-      {advancedInfoCount > 0 && (
-        <Section
-          title="Información avanzada"
-          icon="information-circle"
-          badge={`${advancedInfoCount}`}
-        >
-          <Text variant="caption" style={{ marginBottom: 10 }}>
-            Rasgos, poderes y habilidades desbloqueadas.
-          </Text>
-          {raceTraitItems.length > 0 && (
-            <View style={{ gap: 8, marginBottom: classFeatureItems.length > 0 ? 14 : 0 }}>
-              <Text variant="label">RASGOS DE RAZA</Text>
-              <FeatureList items={raceTraitItems} />
-            </View>
+      {tab === "bag" && <Section title="Mochila" icon="bag" defaultOpen><InventorySection character={character} update={updateChar.mutate} /></Section>}
+
+      {tab === "combat" && cls && (
+        <>
+          <View style={{ marginTop: 18 }}>
+            <Text variant="label" style={{ marginBottom: 8 }}>ARMA</Text>
+            <WeaponSection character={character} cls={cls} update={updateChar.mutate} />
+          </View>
+          {resourcesCount(cls, character.level) > 0 && <Section title="Recursos" icon="battery-charging" defaultOpen><ResourcesSection character={character} cls={cls} update={updateChar.mutate} /></Section>}
+          {cls.spellcasting && <Section title="Espacios de hechizos" icon="flame"><SpellSlotsSection character={character} cls={cls} update={updateChar.mutate} /></Section>}
+          {cls.spellcasting && (
+            <>
+              <Pressable onPress={() => router.push(`/spells/${id}`)} style={styles.manageSpellsButton}>
+                <Ionicons name="sparkles" size={18} color={colors.text} />
+                <Text style={styles.manageSpellsText}>Gestionar hechizos</Text>
+              </Pressable>
+              <Text variant="caption" style={{ marginBottom: 10 }}>Para pegar con un hechizo tirá d20{spellAtk != null ? ` ${formatMod(spellAtk)}` : ""}.</Text>
+              {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((lvl) => {
+                const spells = visibleSpells.filter((s) => s.level === lvl);
+                if (!spells.length) return null;
+                return <View key={lvl}><Text variant="label" style={{ marginTop: 14, marginBottom: 8 }}>{spellLevelLabel(lvl).toUpperCase()}</Text>{spells.map((s, i) => <SpellRow key={s._id} spell={s} delay={i * 25} character={character} update={updateChar.mutate} />)}</View>;
+              })}
+            </>
           )}
-          {classFeatureItems.length > 0 && (
-            <View style={{ gap: 8 }}>
-              <Text variant="label">HABILIDADES DE CLASE</Text>
-              <FeatureList items={classFeatureItems} />
-            </View>
+        </>
+      )}
+
+      {tab === "notes" && <NotesSection character={character} update={updateChar.mutate} />}
+
+      {tab === "tracker" && (
+        <Section title="Tracker" icon="list" defaultOpen>
+          <Text variant="caption" style={{ marginBottom: 10 }}>Combate actual. Para administrar todo el combate, abrí la pestaña Combate.</Text>
+          {participants.length === 0 ? (
+            <Text variant="body">No hay nadie en combate todavía.</Text>
+          ) : (
+            participants.map((p, index) => (
+              <HeroTrackerRow
+                key={p._id}
+                participant={p}
+                active={index === tracker?.activeIndex}
+                delay={index * 35}
+              />
+            ))
           )}
         </Section>
       )}
+
+      <InfoModal info={infoModal} onClose={() => setInfoModal(null)} />
 
       <LevelUpModal
         visible={levelUpOpen}
@@ -435,21 +439,156 @@ function QuickStat({
   label,
   value,
   onPress,
+  onInfo,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
   value: string | number;
   onPress?: () => void;
+  onInfo?: () => void;
 }) {
   const content = (
     <View style={styles.quickStat}>
-      {onPress && <Ionicons name="pencil" size={10} color={colors.textFaint} style={styles.quickEdit} />}
       <Ionicons name={icon} size={16} color={colors.accent} />
       <Text style={styles.quickValue}>{value}</Text>
       <Text variant="caption">{label}</Text>
     </View>
   );
-  return onPress ? <Pressable onPress={onPress} style={{ flex: 1 }}>{content}</Pressable> : <View style={{ flex: 1 }}>{content}</View>;
+  return (
+    <Pressable onPress={onInfo || onPress} onLongPress={onPress} style={{ flex: 1 }}>
+      {content}
+    </Pressable>
+  );
+}
+
+function HeroTabs({
+  active,
+  onChange,
+}: {
+  active: "main" | "bag" | "combat" | "notes" | "tracker";
+  onChange: (tab: "main" | "bag" | "combat" | "notes" | "tracker") => void;
+}) {
+  const tabs = [
+    { key: "main", icon: "person", label: "Main" },
+    { key: "bag", icon: "bag", label: "Mochila" },
+    { key: "combat", icon: "flash", label: "Combate" },
+    { key: "notes", icon: "journal", label: "Notas" },
+    { key: "tracker", icon: "list", label: "Tracker" },
+  ] as const;
+  return (
+    <View style={styles.heroTabs}>
+      {tabs.map((t) => (
+        <Pressable key={t.key} onPress={() => onChange(t.key)} style={[styles.heroTab, active === t.key && styles.heroTabActive]}>
+          <Ionicons name={t.icon} size={16} color={active === t.key ? colors.text : colors.textFaint} />
+          <Text style={[styles.heroTabText, active === t.key && { color: colors.text }]}>{t.label}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+function HeroTrackerRow({
+  participant,
+  active,
+  delay,
+}: {
+  participant: Participant;
+  active: boolean;
+  delay: number;
+}) {
+  const user = useAuth((s) => s.user);
+  const patch = useTrackerPatch();
+  const [initEditOpen, setInitEditOpen] = useState(false);
+  const isMonster = participant.type === "monster";
+  const accent = participant.color || (isMonster ? colors.secondary : colors.accent);
+  const canSeeHp = participant.hp !== undefined && participant.maxHp !== undefined;
+  const canEdit = user?.role === "dm" || user?.role === "admin" || participant.ownerUserId === user?.id;
+
+  return (
+    <MotiView
+      from={{ opacity: 0, translateX: 20 }}
+      animate={{ opacity: 1, translateX: 0, scale: active ? 1 : 0.99 }}
+      transition={{ type: "timing", duration: 280, delay }}
+      style={[styles.trackerRow, active && { borderColor: accent, borderWidth: 1.5 }, shadow.card]}
+    >
+      {active && <LinearGradient colors={[accent + "22", "transparent"]} style={StyleSheet.absoluteFill} />}
+      <Pressable
+        style={styles.trackerInitBox}
+        disabled={!canEdit}
+        onPress={() => setInitEditOpen(true)}
+        hitSlop={8}
+      >
+        <Text style={[styles.trackerInitNum, active && { color: accent }]}>{participant.initiative}</Text>
+        <Text variant="caption" color={colors.textFaint}>
+          init
+        </Text>
+        {canEdit && <Ionicons name="pencil" size={9} color={colors.textFaint} style={{ marginTop: 2 }} />}
+      </Pressable>
+
+      <View style={{ flex: 1 }}>
+        <View style={styles.trackerNameRow}>
+          <Ionicons name={isMonster ? "skull" : "shield-half"} size={14} color={accent} />
+          <Text variant="subtitle" style={{ fontSize: 15, flex: 1 }} numberOfLines={1}>
+            {participant.name}
+          </Text>
+          {active && (
+            <View style={[styles.trackerTurnPill, { backgroundColor: accent }]}>
+              <Text style={styles.trackerTurnText}>TURNO</Text>
+            </View>
+          )}
+        </View>
+
+        {canSeeHp ? (
+          <>
+            <View style={{ marginTop: 6 }}>
+              <HpBar current={participant.hp || 0} max={participant.maxHp || 1} temp={participant.tempHp || 0} height={10} />
+            </View>
+            <View style={styles.trackerHpMetaRow}>
+              <Text variant="caption">
+                {participant.hp}
+                {(participant.tempHp || 0) > 0 ? ` + ${participant.tempHp}` : ""}/{participant.maxHp} PV · CA {participant.ac}
+              </Text>
+              {(participant.tempHp || 0) > 0 && (
+                <View style={styles.trackerTempMiniChip}>
+                  <Text style={styles.trackerTempMiniText}>Temp {participant.tempHp}</Text>
+                </View>
+              )}
+            </View>
+          </>
+        ) : (
+          null
+        )}
+      </View>
+
+      <NumberEditorModal
+        visible={initEditOpen}
+        title="Iniciativa"
+        subtitle={`Cambiar la iniciativa de ${participant.name}.`}
+        value={participant.initiative}
+        min={-5}
+        max={40}
+        onClose={() => setInitEditOpen(false)}
+        onSave={(v) => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          patch.mutate({ pid: participant._id, initiative: v });
+        }}
+      />
+    </MotiView>
+  );
+}
+
+function InfoModal({ info, onClose }: { info: { title: string; body: string } | null; onClose: () => void }) {
+  return (
+    <Modal visible={!!info} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <Card style={{ width: "100%", maxWidth: 340 }}>
+          <Text variant="title">{info?.title}</Text>
+          <Text variant="body" style={{ marginTop: 8 }}>{info?.body}</Text>
+          <Button label="Entendido" icon="checkmark" onPress={onClose} style={{ marginTop: 16 }} />
+        </Card>
+      </Pressable>
+    </Modal>
+  );
 }
 
 function InfoChip({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
@@ -652,6 +791,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   classBadge: { marginTop: -18, marginBottom: 2, borderRadius: radius.pill, padding: 2, backgroundColor: colors.bg },
+  photoEditBadge: {
+    position: "absolute",
+    right: -2,
+    bottom: -2,
+    width: 28,
+    height: 28,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: colors.bg,
+  },
   classBadgeInner: {
     width: 34,
     height: 34,
@@ -693,6 +845,46 @@ const styles = StyleSheet.create({
   hpBtn: { flex: 1, paddingVertical: 12, borderRadius: radius.md, alignItems: "center" },
   hpBtnDark: { backgroundColor: colors.primary },
   hpBtnLight: { backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
+  heroTabs: {
+    flexDirection: "row",
+    gap: 6,
+    marginTop: 18,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    padding: 5,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  heroTab: { flex: 1, minHeight: 44, alignItems: "center", justifyContent: "center", gap: 2, borderRadius: radius.sm },
+  heroTabActive: { backgroundColor: colors.primary },
+  heroTabText: { fontFamily: font.bodyBold, fontSize: 10, color: colors.textFaint },
+  trackerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    overflow: "hidden",
+  },
+  trackerInitBox: { alignItems: "center", width: 42 },
+  trackerInitNum: { fontFamily: font.display, fontSize: 24, color: colors.text },
+  trackerNameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  trackerTurnPill: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: radius.pill },
+  trackerTurnText: { fontSize: 10, color: colors.bg, fontFamily: font.bodyBold },
+  trackerHpMetaRow: { marginTop: 3, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  trackerTempMiniChip: {
+    backgroundColor: "#4EA3FF22",
+    borderColor: "#4EA3FF66",
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  trackerTempMiniText: { color: "#8FC5FF", fontFamily: font.bodyBold, fontSize: 11 },
   quickRow: { flexDirection: "row", gap: 10, marginTop: 14 },
   quickStat: {
     backgroundColor: colors.surface,
@@ -703,7 +895,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  quickEdit: { position: "absolute", top: 6, right: 6 },
   quickValue: { fontFamily: font.display, fontSize: 18, color: colors.text },
   abilityGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "space-between" },
   ability: {
@@ -716,7 +907,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  abilityPrimary: { borderColor: colors.warning, backgroundColor: colors.surfaceAlt },
   abilityMod: { fontFamily: font.display, fontSize: 22, color: colors.accent },
+  manageSpellsButton: {
+    marginTop: 18,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: colors.primary,
+    borderRadius: radius.pill,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: colors.accent,
+  },
+  manageSpellsText: { color: colors.text, fontFamily: font.bodyBold, fontSize: 15 },
   spellLevel: {
     width: 26,
     height: 26,

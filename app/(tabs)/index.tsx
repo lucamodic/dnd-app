@@ -8,6 +8,7 @@ import { Button } from "@/components/Button";
 import { HpBar } from "@/components/HpBar";
 import { useCharacters, Character, Clazz, Race } from "@/api/hooks";
 import { useAuth } from "@/store/auth";
+import { RaceImage } from "@/components/RaceImage";
 import { colors, radius } from "@/theme";
 
 export default function Home() {
@@ -60,6 +61,8 @@ function CharacterCard({ character, delay }: { character: Character; delay: numb
   const race = character.raceId as Race;
   const cls = character.classId as Clazz;
   const accent = cls?.color || colors.secondary;
+  const owner = typeof character.userId === "object" ? character.userId : null;
+  const isDM = useAuth((s) => s.user?.role === "dm" || s.user?.role === "admin");
 
   return (
     <Card
@@ -70,13 +73,22 @@ function CharacterCard({ character, delay }: { character: Character; delay: numb
     >
       <View style={styles.cardTop}>
         <View style={[styles.avatar, { backgroundColor: accent + "33", borderColor: accent }]}>
-          <Text style={{ fontSize: 22, color: colors.text }}>{character.name.charAt(0).toUpperCase()}</Text>
+          <RaceImage
+            uri={character.imageBase64 || race?.imageBase64 || race?.image}
+            style={styles.avatarImage}
+            fallback={<Text style={{ fontSize: 22, color: colors.text }}>{character.name.charAt(0).toUpperCase()}</Text>}
+          />
         </View>
         <View style={{ flex: 1 }}>
           <Text variant="subtitle">{character.name}</Text>
           <Text variant="caption">
             {race?.name} · {cls?.name} · Nivel {character.level}
           </Text>
+          {isDM && owner && (
+            <Text variant="caption" color={colors.accent}>
+              Player: {owner.displayName || owner.username}
+            </Text>
+          )}
         </View>
         <View style={styles.levelBadge}>
           <Text style={styles.levelText}>{character.level}</Text>
@@ -107,7 +119,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
+    overflow: "hidden",
   },
+  avatarImage: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center" },
   levelBadge: {
     width: 34,
     height: 34,

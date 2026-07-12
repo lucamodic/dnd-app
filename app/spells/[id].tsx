@@ -30,6 +30,7 @@ export default function ManageSpells() {
   const [knownIds, setKnownIds] = useState<Set<string>>(new Set());
   const [seeded, setSeeded] = useState(false);
   const [flashId, setFlashId] = useState<string | null>(null);
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!seeded && character?.knownSpells) {
@@ -86,7 +87,11 @@ export default function ManageSpells() {
     if (isKnown) next.delete(spell._id);
     else next.add(spell._id);
     setKnownIds(next);
-    update.mutate({ knownSpells: Array.from(next) as any });
+    setPendingIds((cur) => new Set(cur).add(spell._id));
+    update.mutate(
+      { knownSpells: Array.from(next) as any },
+      { onSettled: () => setPendingIds((cur) => { const out = new Set(cur); out.delete(spell._id); return out; }) }
+    );
   };
 
   return (
@@ -134,14 +139,19 @@ export default function ManageSpells() {
             const isCantrip = spell.level === 0;
             const atLimit = !known && (isCantrip ? cantripCount >= cantripMax : spellCount >= spellMax);
             const flashing = flashId === spell._id;
+            const pending = pendingIds.has(spell._id);
             return (
               <Pressable key={spell._id} onPress={() => toggle(spell, locked)} disabled={locked}>
                 <Card style={[styles.row, (atLimit && !known) && { opacity: 0.6 }, flashing && styles.rowFlash]}>
-                  <Ionicons
-                    name={known ? "checkmark-circle" : "ellipse-outline"}
-                    size={22}
-                    color={known ? colors.accent : colors.muted}
-                  />
+                  {pending ? (
+                    <ActivityIndicator color={colors.accent} />
+                  ) : (
+                    <Ionicons
+                      name={known ? "checkmark-circle" : "ellipse-outline"}
+                      size={22}
+                      color={known ? colors.accent : colors.muted}
+                    />
+                  )}
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                       <Text variant="subtitle" style={{ fontSize: 15 }}>{spell.name}</Text>

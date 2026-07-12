@@ -31,13 +31,22 @@ export function Pips({ max, used, onChange, color = colors.accent }: Props) {
           <Pressable key={i} onPress={() => handle(i)} hitSlop={6}>
             <MotiView
               animate={{
-                backgroundColor: filled ? color : "transparent",
                 borderColor: filled ? color : colors.muted,
                 scale: filled ? 1 : 0.9,
               }}
               transition={{ type: "timing", duration: 150 }}
               style={styles.pip}
-            />
+            >
+              <MotiView
+                animate={{
+                  opacity: filled ? 1 : 0,
+                  scale: filled ? 1 : 0.3,
+                  backgroundColor: color,
+                }}
+                transition={{ type: "timing", duration: 150 }}
+                style={styles.pipFill}
+              />
+            </MotiView>
           </Pressable>
         );
       })}
@@ -47,5 +56,14 @@ export function Pips({ max, used, onChange, color = colors.accent }: Props) {
 
 const styles = StyleSheet.create({
   row: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  pip: { width: 22, height: 22, borderRadius: 11, borderWidth: 2 },
+  pip: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.surface,
+  },
+  pipFill: { width: 12, height: 12, borderRadius: 6 },
 });

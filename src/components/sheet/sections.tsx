@@ -32,6 +32,7 @@ const COINS: { key: keyof Character["currency"]; label: string; color: string }[
 /* ---------- Arma equipada ---------- */
 export function WeaponSection({ character, cls, update }: { character: Character; cls: Clazz; update: UpdateFn }) {
   const weapon = WEAPON_BY_INDEX[character.weapon] || WEAPON_BY_INDEX["unarmed"];
+  const needsWeapon = !character.weapon || character.weapon === "unarmed";
   const [weaponOpen, setWeaponOpen] = useState(false);
   const { roll } = useDice();
   const attack = weaponAttackInfo(character, weapon);
@@ -41,7 +42,13 @@ export function WeaponSection({ character, cls, update }: { character: Character
 
   return (
     <View>
-      <Pressable onPress={() => setWeaponOpen(true)} style={styles.weaponRow}>
+      {needsWeapon && (
+        <View style={styles.weaponWarning}>
+          <Ionicons name="warning" size={15} color={colors.warning} />
+          <Text variant="caption" color={colors.warning}>Seleccioná un arma para calcular bien ataque y daño.</Text>
+        </View>
+      )}
+      <Pressable onPress={() => setWeaponOpen(true)} style={[styles.weaponRow, needsWeapon && styles.weaponRowWarning]}>
         <View style={styles.weaponIcon}>
           <Ionicons name="flash" size={16} color={colors.accent} />
         </View>
@@ -81,9 +88,15 @@ export function WeaponSection({ character, cls, update }: { character: Character
 
 /* ---------- Inventario (monedas + notas) ---------- */
 export function InventorySection({ character, update }: { character: Character; update: UpdateFn }) {
-  const [notes, setNotes] = useState(character.notes || "");
+  const [item, setItem] = useState("");
+  const items = character.inventoryItems || [];
 
-  useEffect(() => setNotes(character.notes || ""), [character.notes]);
+  const addItem = () => {
+    const text = item.trim();
+    if (!text) return;
+    update({ inventoryItems: [...items, { text, createdAt: new Date().toISOString() }] });
+    setItem("");
+  };
 
   return (
     <View style={{ gap: 16 }}>
@@ -95,18 +108,74 @@ export function InventorySection({ character, update }: { character: Character; 
       <View style={styles.divider} />
 
       <View>
-        <Text variant="label" style={{ marginBottom: 8 }}>NOTAS</Text>
-        <TextInput
-          multiline
-          value={notes}
-          onChangeText={setNotes}
-          onBlur={() => update({ notes })}
-          placeholder="Objetos, aliados, pistas, lo que quieras anotar..."
-          placeholderTextColor={colors.textFaint}
-          style={styles.notesInput}
-        />
+        <Text variant="label" style={{ marginBottom: 8 }}>ÍTEMS</Text>
+        <View style={styles.itemAddRow}>
+          <TextInput
+            value={item}
+            onChangeText={setItem}
+            placeholder="Agregar ítem..."
+            placeholderTextColor={colors.textFaint}
+            style={styles.itemInput}
+          />
+          <StepBtn icon="add" onPress={addItem} />
+        </View>
+        <View style={{ gap: 6, marginTop: 10 }}>
+          {items.length === 0 && <Text variant="caption">Todavía no agregaste ítems.</Text>}
+          {items.map((it, i) => (
+            <View key={it._id || `${it.text}-${i}`} style={styles.itemRow}>
+              <Text variant="body" style={{ flex: 1, fontSize: 14 }}>{it.text}</Text>
+              <Pressable onPress={() => update({ inventoryItems: items.filter((_, idx) => idx !== i) })}>
+                <Ionicons name="close" size={16} color={colors.textFaint} />
+              </Pressable>
+            </View>
+          ))}
+        </View>
       </View>
 
+    </View>
+  );
+}
+
+export function NotesSection({ character, update }: { character: Character; update: UpdateFn }) {
+  const initial = character.noteSections || { general: character.notes || "", campaign: "", npcs: "", places: "", other: "" };
+  const [notes, setNotes] = useState(initial);
+
+  useEffect(() => {
+    setNotes(character.noteSections || { general: character.notes || "", campaign: "", npcs: "", places: "", other: "" });
+  }, [character.noteSections, character.notes]);
+
+  const save = (key: keyof typeof notes, value: string) => {
+    const next = { ...notes, [key]: value };
+    setNotes(next);
+    update({ noteSections: next, notes: next.general });
+  };
+
+  return (
+    <View style={{ gap: 12, marginTop: 14 }}>
+      <NoteBox title="Generales" value={notes.general} onChange={(v) => save("general", v)} />
+      <NoteBox title="Campaña" value={notes.campaign} onChange={(v) => save("campaign", v)} />
+      <NoteBox title="NPCs" value={notes.npcs} onChange={(v) => save("npcs", v)} />
+      <NoteBox title="Lugares" value={notes.places} onChange={(v) => save("places", v)} />
+      <NoteBox title="Otros" value={notes.other} onChange={(v) => save("other", v)} />
+    </View>
+  );
+}
+
+function NoteBox({ title, value, onChange }: { title: string; value: string; onChange: (v: string) => void }) {
+  const [local, setLocal] = useState(value || "");
+  useEffect(() => setLocal(value || ""), [value]);
+  return (
+    <View>
+      <Text variant="label" style={{ marginBottom: 6 }}>{title.toUpperCase()}</Text>
+      <TextInput
+        multiline
+        value={local}
+        onChangeText={setLocal}
+        onBlur={() => onChange(local)}
+        placeholder={`Notas de ${title.toLowerCase()}...`}
+        placeholderTextColor={colors.textFaint}
+        style={styles.notesInput}
+      />
     </View>
   );
 }
@@ -378,6 +447,19 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   weaponRollText: { fontFamily: font.bodyBold, fontSize: 12, color: colors.text },
+  weaponWarning: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: colors.warning + "22",
+    borderColor: colors.warning + "88",
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  weaponRowWarning: { borderColor: colors.warning, backgroundColor: colors.warning + "12" },
   divider: { height: 1, backgroundColor: colors.border },
   notesInput: {
     backgroundColor: colors.surfaceAlt,
@@ -390,6 +472,29 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontFamily: font.body,
     fontSize: 14,
+  },
+  itemAddRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  itemInput: {
+    flex: 1,
+    backgroundColor: colors.bg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    color: colors.text,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontFamily: font.body,
+  },
+  itemRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   coinRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   coinDot: { width: 16, height: 16, borderRadius: 8 },

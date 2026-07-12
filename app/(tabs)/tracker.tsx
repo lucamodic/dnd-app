@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, StyleSheet, TextInput, View, FlatList } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { MotiView } from "moti";
@@ -26,7 +26,7 @@ import { colors, font, radius, shadow } from "@/theme";
 
 export default function TrackerTab() {
   const user = useAuth((s) => s.user);
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role === "dm" || user?.role === "admin";
   const { data: tracker, isLoading } = useTracker();
   const next = useTrackerNext();
   const sort = useTrackerSort();
@@ -59,8 +59,8 @@ export default function TrackerTab() {
           <Card>
             <Text variant="subtitle">No hay nadie en combate</Text>
             <Text variant="body" style={{ marginTop: 6 }}>
-              Sumá tu personaje desde su ficha (botón "Sumarme al combate").
-              {isAdmin ? " Como admin, agregá bichos con el botón de abajo." : ""}
+              Sumá tu personaje desde su ficha (botón "Combatir").
+              {isAdmin ? " Como DM, agregá bichos con el botón de abajo." : ""}
             </Text>
           </Card>
         </View>
@@ -132,21 +132,24 @@ function ParticipantRow({
   const isMonster = participant.type === "monster";
   const accent = participant.color || (isMonster ? colors.secondary : colors.accent);
   const [initEditOpen, setInitEditOpen] = useState(false);
-  const [tempHpEditOpen, setTempHpEditOpen] = useState(false);
+  const [hpChange, setHpChange] = useState<"damage" | "heal" | null>(null);
+  const canSeeHp = participant.hp !== undefined && participant.maxHp !== undefined;
 
-  const changeHp = (delta: number) => {
+  const changeHp = (amount: number, mode: "damage" | "heal") => {
     if (!canEdit) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (delta < 0) {
-      const damage = Math.abs(delta);
+    const hp = participant.hp || 0;
+    const maxHp = participant.maxHp || 0;
+    if (mode === "damage") {
+      const damage = Math.max(0, amount);
       const tempAbsorb = Math.min(participant.tempHp || 0, damage);
       const nextTempHp = Math.max(0, (participant.tempHp || 0) - tempAbsorb);
       const remainingDamage = damage - tempAbsorb;
-      const nextHp = Math.max(0, participant.hp - remainingDamage);
+      const nextHp = Math.max(0, hp - remainingDamage);
       patch.mutate({ pid: participant._id, hp: nextHp, tempHp: nextTempHp });
       return;
     }
-    patch.mutate({ pid: participant._id, hp: Math.max(0, Math.min(participant.maxHp, participant.hp + delta)) });
+    patch.mutate({ pid: participant._id, hp: Math.max(0, Math.min(maxHp, hp + Math.max(0, amount))) });
   };
 
   return (
@@ -182,26 +185,32 @@ function ParticipantRow({
             </View>
           )}
         </View>
-        <View style={{ marginTop: 6 }}>
-          <HpBar current={participant.hp} max={participant.maxHp} temp={participant.tempHp || 0} height={10} />
-        </View>
-        <View style={styles.hpMetaRow}>
-          <Text variant="caption">
-            {participant.hp}
-            {(participant.tempHp || 0) > 0 ? ` + ${participant.tempHp}` : ""}/{participant.maxHp} PV · CA {participant.ac}
-          </Text>
-          {canEdit && (
-            <Pressable onPress={() => setTempHpEditOpen(true)} hitSlop={6} style={styles.tempMiniChip}>
-              <Text style={styles.tempMiniText}>Temp {participant.tempHp || 0}</Text>
-            </Pressable>
-          )}
-        </View>
+        {canSeeHp ? (
+          <>
+            <View style={{ marginTop: 6 }}>
+              <HpBar current={participant.hp || 0} max={participant.maxHp || 1} temp={participant.tempHp || 0} height={10} />
+            </View>
+            <View style={styles.hpMetaRow}>
+              <Text variant="caption">
+                {participant.hp}
+                {(participant.tempHp || 0) > 0 ? ` + ${participant.tempHp}` : ""}/{participant.maxHp} PV · CA {participant.ac}
+              </Text>
+              {(participant.tempHp || 0) > 0 && (
+                <View style={styles.tempMiniChip}>
+                  <Text style={styles.tempMiniText}>Temp {participant.tempHp}</Text>
+                </View>
+              )}
+            </View>
+          </>
+        ) : (
+          null
+        )}
       </View>
 
-      {canEdit && (
+      {canEdit && canSeeHp && (
         <View style={styles.pActions}>
-          <MiniBtn icon="remove" onPress={() => changeHp(-1)} />
-          <MiniBtn icon="add" onPress={() => changeHp(1)} />
+          <MiniBtn icon="remove" onPress={() => setHpChange("damage")} />
+          <MiniBtn icon="add" onPress={() => setHpChange("heal")} />
           <MiniBtn icon="close" onPress={() => remove.mutate(participant._id)} danger />
         </View>
       )}
@@ -216,17 +225,62 @@ function ParticipantRow({
         onClose={() => setInitEditOpen(false)}
         onSave={(v) => patch.mutate({ pid: participant._id, initiative: v })}
       />
-      <NumberEditorModal
-        visible={tempHpEditOpen}
-        title="Vida temporal"
-        subtitle={`Cambiar la vida temporal de ${participant.name}.`}
-        value={participant.tempHp || 0}
-        min={0}
-        max={999}
-        onClose={() => setTempHpEditOpen(false)}
-        onSave={(v) => patch.mutate({ pid: participant._id, tempHp: v })}
+      <HpChangeModal
+        visible={hpChange !== null}
+        mode={hpChange || "damage"}
+        name={participant.name}
+        onClose={() => setHpChange(null)}
+        onApply={(n) => {
+          changeHp(n, hpChange || "damage");
+          setHpChange(null);
+        }}
       />
     </MotiView>
+  );
+}
+
+function HpChangeModal({
+  visible,
+  mode,
+  name,
+  onClose,
+  onApply,
+}: {
+  visible: boolean;
+  mode: "damage" | "heal";
+  name: string;
+  onClose: () => void;
+  onApply: (amount: number) => void;
+}) {
+  const [value, setValue] = useState("");
+  useEffect(() => {
+    if (visible) setValue("");
+  }, [visible]);
+  const amount = parseInt(value, 10) || 0;
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+        <Card style={{ width: "100%", maxWidth: 320 }}>
+          <Text variant="title">{mode === "damage" ? "Hacer daño" : "Curar vida"}</Text>
+          <Text variant="caption" style={{ marginTop: 4 }}>{name}</Text>
+          <TextInput
+            value={value}
+            onChangeText={(t) => setValue(t.replace(/[^0-9]/g, ""))}
+            keyboardType="number-pad"
+            placeholder="Cantidad"
+            placeholderTextColor={colors.textFaint}
+            style={styles.amountInput}
+            autoFocus
+          />
+          <Button
+            label={mode === "damage" ? "Aplicar daño" : "Aplicar curación"}
+            icon={mode === "damage" ? "remove-circle" : "add-circle"}
+            onPress={() => amount > 0 && onApply(amount)}
+            disabled={amount <= 0}
+          />
+        </Card>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -402,6 +456,19 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   tempMiniText: { color: "#8FC5FF", fontFamily: font.bodyBold, fontSize: 11 },
+  modalBackdrop: { flex: 1, backgroundColor: colors.overlay, alignItems: "center", justifyContent: "center", padding: 24 },
+  amountInput: {
+    marginVertical: 16,
+    backgroundColor: colors.bg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    color: colors.text,
+    fontFamily: font.display,
+    fontSize: 28,
+    textAlign: "center",
+    paddingVertical: 10,
+  },
   pActions: { gap: 6 },
   miniBtn: {
     width: 30,

@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { router, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { MotiView, AnimatePresence } from "moti";
 import { LinearGradient } from "expo-linear-gradient";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { useClasses, useRaces, useCreateCharacter, useRollStats, Race, Clazz, AbilityScores } from "@/api/hooks";
-import { abilityMod, formatMod, ABILITY_ORDER, ABILITY_LABELS } from "@/lib/format";
+import { abilityMod, classHighlightsAbility, formatMod, ABILITY_ORDER, ABILITY_LABELS } from "@/lib/format";
 import { ClassIcon } from "@/components/ClassIcon";
 import { RaceImage } from "@/components/RaceImage";
 import { colors, font, radius } from "@/theme";
@@ -28,6 +29,7 @@ export default function NewCharacter() {
   const [name, setName] = useState("");
   const [stats, setStats] = useState<AbilityScores | null>(null);
   const scrollRef = useRef<ScrollView>(null);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
@@ -56,128 +58,147 @@ export default function NewCharacter() {
   };
 
   return (
-    <Screen scrollViewRef={scrollRef}>
+    <Screen scroll={false}>
       <Stack.Screen options={{ headerShown: false }} />
-      <View style={styles.header}>
-        <Ionicons name="arrow-back" size={24} color={colors.text} onPress={() => (step === 0 ? router.back() : setStep((s) => (s - 1) as Step))} />
-        <StepDots step={step} />
-        <View style={{ width: 24 }} />
-      </View>
+      <ScrollView
+        ref={scrollRef}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.scrollContent, step < 2 && { paddingBottom: 150 + insets.bottom }]}
+      >
+        <View style={styles.header}>
+          <Ionicons name="arrow-back" size={24} color={colors.text} onPress={() => (step === 0 ? router.back() : setStep((s) => (s - 1) as Step))} />
+          <StepDots step={step} />
+          <View style={{ width: 24 }} />
+        </View>
 
-      <AnimatePresence exitBeforeEnter>
-        {step === 0 && (
-          <MotiView key="race" {...slide} style={{ flex: 1 }}>
-            <Text variant="display">Elegí tu raza</Text>
-            <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
-              Define de dónde viene tu héroe y sus rasgos.
-            </Text>
-            {racesLoading && <ActivityIndicator color={colors.accent} />}
-            {races?.map((r, i) => (
-              <RaceOption key={r._id} race={r} selected={race?._id === r._id} onPress={() => setRace(r)} delay={i * 40} />
-            ))}
-            <Button label="Siguiente" icon="arrow-forward" onPress={() => setStep(1)} disabled={!race} style={{ marginTop: 12 }} />
-          </MotiView>
-        )}
-
-        {step === 1 && (
-          <MotiView key="class" {...slide} style={{ flex: 1 }}>
-            <Text variant="display">Elegí tu clase</Text>
-            <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
-              Tu rol en el grupo y cómo peleás.
-            </Text>
-            {classesLoading && <ActivityIndicator color={colors.accent} />}
-            {classes?.map((c, i) => (
-              <ClassOption key={c._id} cls={c} selected={cls?._id === c._id} onPress={() => setCls(c)} delay={i * 40} />
-            ))}
-            <Button label="Siguiente" icon="arrow-forward" onPress={goToNaming} disabled={!cls} style={{ marginTop: 12 }} />
-          </MotiView>
-        )}
-
-        {step === 2 && (
-          <MotiView key="name" {...slide} style={{ flex: 1 }}>
-            <Text variant="display">¿Cómo se llama?</Text>
-            <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
-              Ponele nombre a tu {race?.name.toLowerCase()} {cls?.name.toLowerCase()}.
-            </Text>
-
-            <View style={styles.field}>
-              <Ionicons name="create" size={18} color={colors.muted} />
-              <TextInput
-                placeholder="Nombre del héroe"
-                placeholderTextColor={colors.textFaint}
-                value={name}
-                onChangeText={setName}
-                style={styles.input}
-              />
-            </View>
-
-            <Card style={{ marginTop: 18 }} accent={cls?.color}>
-              <Text variant="label">RESUMEN</Text>
-              <Text variant="subtitle" style={{ marginTop: 8 }}>
-                {name.trim() || "Tu héroe"}
+        <AnimatePresence exitBeforeEnter>
+          {step === 0 && (
+            <MotiView key="race" {...slide} style={{ flex: 1 }}>
+              <Text variant="display">Elegí tu raza</Text>
+              <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
+                Define de dónde viene tu héroe y sus rasgos.
               </Text>
-              <Text variant="caption">
-                {race?.name} · {cls?.name} · Nivel 1
-              </Text>
-              <View style={styles.summaryRow}>
-                <SummaryStat label="Dado de vida" value={`d${cls?.hitDie}`} />
-                <SummaryStat label="Velocidad" value={`${race?.speed} pies`} />
-                <SummaryStat label="Mago" value={cls?.spellcasting ? "Sí" : "No"} />
-              </View>
-            </Card>
+              {racesLoading && <ActivityIndicator color={colors.accent} />}
+              {races?.map((r, i) => (
+                <RaceOption key={r._id} race={r} selected={race?._id === r._id} onPress={() => setRace(r)} delay={i * 40} />
+              ))}
+            </MotiView>
+          )}
 
-            {/* Características generadas (4d6, las mejores para tu clase) */}
-            <Card style={{ marginTop: 14 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                <Text variant="label">CARACTERÍSTICAS</Text>
-                <Button
-                  label="Volver a tirar"
-                  icon="dice"
-                  small
-                  variant="secondary"
-                  loading={rollStats.isPending}
-                  onPress={async () => cls && setStats(await rollStats.mutateAsync(cls._id))}
+          {step === 1 && (
+            <MotiView key="class" {...slide} style={{ flex: 1 }}>
+              <Text variant="display">Elegí tu clase</Text>
+              <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
+                Tu rol en el grupo y cómo peleás.
+              </Text>
+              {classesLoading && <ActivityIndicator color={colors.accent} />}
+              {classes?.map((c, i) => (
+                <ClassOption key={c._id} cls={c} selected={cls?._id === c._id} onPress={() => setCls(c)} delay={i * 40} />
+              ))}
+            </MotiView>
+          )}
+
+          {step === 2 && (
+            <MotiView key="name" {...slide} style={{ flex: 1 }}>
+              <Text variant="display">¿Cómo se llama?</Text>
+              <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
+                Ponele nombre a tu {race?.name.toLowerCase()} {cls?.name.toLowerCase()}.
+              </Text>
+
+              <View style={styles.field}>
+                <Ionicons name="create" size={18} color={colors.muted} />
+                <TextInput
+                  placeholder="Nombre del héroe"
+                  placeholderTextColor={colors.textFaint}
+                  value={name}
+                  onChangeText={setName}
+                  style={styles.input}
                 />
               </View>
-              <Text variant="caption" style={{ marginTop: 6, marginBottom: 10 }}>
-                Tiramos 6 veces 4d6 y las repartimos según tu clase. Podés cambiarlas después en la ficha.
-              </Text>
-              {rollStats.isPending && !stats ? (
-                <ActivityIndicator color={colors.accent} />
-              ) : (
-                <View style={styles.statsGrid}>
-                  {ABILITY_ORDER.map((key) => (
-                    <View key={key} style={styles.statCell}>
-                      <Text variant="caption">{ABILITY_LABELS[key]}</Text>
-                      <Text style={styles.statVal}>{stats ? stats[key] : "—"}</Text>
-                      <Text variant="caption" color={colors.textFaint}>
-                        {stats ? formatMod(abilityMod(stats[key])) : ""}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-              <Text variant="caption" style={{ marginTop: 8 }}>
-                Nota: la raza le suma sus bonos encima al crear el personaje.
-              </Text>
-            </Card>
 
-            <Button
-              label="Crear héroe"
-              icon="sparkles"
-              onPress={onCreate}
-              loading={createCharacter.isPending}
-              disabled={!name.trim()}
-              style={{ marginTop: 18 }}
-            />
-            {createCharacter.error && (
-              <Text color={colors.danger} center style={{ marginTop: 8 }}>
-                {(createCharacter.error as Error).message}
-              </Text>
-            )}
-          </MotiView>
-        )}
-      </AnimatePresence>
+              <Card style={{ marginTop: 18 }} accent={cls?.color}>
+                <Text variant="label">RESUMEN</Text>
+                <Text variant="subtitle" style={{ marginTop: 8 }}>
+                  {name.trim() || "Tu héroe"}
+                </Text>
+                <Text variant="caption">
+                  {race?.name} · {cls?.name} · Nivel 1
+                </Text>
+                <View style={styles.summaryRow}>
+                  <SummaryStat label="Dado de vida" value={`d${cls?.hitDie}`} />
+                  <SummaryStat label="Velocidad" value={`${race?.speed} pies`} />
+                  <SummaryStat label="Mago" value={cls?.spellcasting ? "Sí" : "No"} />
+                </View>
+              </Card>
+
+              {/* Características generadas (4d6, las mejores para tu clase) */}
+              <Card style={{ marginTop: 14 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                  <Text variant="label">HABILIDADES</Text>
+                  <Button
+                    label="Volver a tirar"
+                    icon="dice"
+                    small
+                    variant="secondary"
+                    loading={rollStats.isPending}
+                    onPress={async () => cls && setStats(await rollStats.mutateAsync(cls._id))}
+                  />
+                </View>
+                <Text variant="caption" style={{ marginTop: 6, marginBottom: 10 }}>
+                  Tiramos 6 veces 4d6 y las repartimos según tu clase. Podés cambiarlas después en la ficha.
+                </Text>
+                {rollStats.isPending && !stats ? (
+                  <ActivityIndicator color={colors.accent} />
+                ) : (
+                  <View style={styles.statsGrid}>
+                  {ABILITY_ORDER.map((key) => (
+                      <View key={key} style={[styles.statCell, classHighlightsAbility(cls, key) && styles.statCellPrimary]}>
+                        <Text variant="caption">{ABILITY_LABELS[key]}</Text>
+                        <Text style={styles.statVal}>{stats ? stats[key] : "—"}</Text>
+                        <Text variant="caption" color={colors.textFaint}>
+                          {stats ? formatMod(abilityMod(stats[key])) : ""}
+                        </Text>
+                        {cls?.savingThrows?.includes(key) && (
+                          <Text variant="caption" color={colors.accent}>
+                            Salv prof.
+                          </Text>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                )}
+                <Text variant="caption" style={{ marginTop: 8 }}>
+                  Nota: la raza le suma sus bonos encima al crear el personaje.
+                </Text>
+              </Card>
+
+              <Button
+                label="Crear héroe"
+                icon="sparkles"
+                onPress={onCreate}
+                loading={createCharacter.isPending}
+                disabled={!name.trim()}
+                style={{ marginTop: 18 }}
+              />
+              {createCharacter.error && (
+                <Text color={colors.danger} center style={{ marginTop: 8 }}>
+                  {(createCharacter.error as Error).message}
+                </Text>
+              )}
+            </MotiView>
+          )}
+        </AnimatePresence>
+      </ScrollView>
+      {step < 2 && (
+        <View style={[styles.floatingNext, { bottom: 12 + insets.bottom }]}>
+          <Button
+            label="Siguiente"
+            icon="arrow-forward"
+            onPress={() => (step === 0 ? setStep(1) : goToNaming())}
+            disabled={step === 0 ? !race : !cls}
+          />
+        </View>
+      )}
     </Screen>
   );
 }
@@ -190,6 +211,7 @@ const slide = {
 };
 
 function RaceOption({ race, selected, onPress, delay }: { race: Race; selected: boolean; onPress: () => void; delay: number }) {
+  const [expanded, setExpanded] = useState(false);
   return (
     <Card onPress={onPress} delay={delay} style={[styles.option, selected && styles.optionSelected]}>
       <View style={styles.optionRow}>
@@ -204,9 +226,19 @@ function RaceOption({ race, selected, onPress, delay }: { race: Race; selected: 
         />
         <View style={{ flex: 1 }}>
           <Text variant="subtitle">{race.name}</Text>
-          <Text variant="body" numberOfLines={3} style={{ marginTop: 2, fontSize: 13 }}>
+          <Text variant="body" numberOfLines={expanded ? undefined : 3} style={{ marginTop: 2, fontSize: 13 }}>
             {race.description}
           </Text>
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation();
+              setExpanded((v) => !v);
+            }}
+            hitSlop={6}
+            style={{ marginTop: 6 }}
+          >
+            <Text variant="caption" color={colors.accent}>{expanded ? "Ver menos" : "Leer descripción"}</Text>
+          </Pressable>
         </View>
         {selected && <Ionicons name="checkmark-circle" size={22} color={colors.accent} />}
       </View>
@@ -254,6 +286,7 @@ function StepDots({ step }: { step: number }) {
 }
 
 const styles = StyleSheet.create({
+  scrollContent: { paddingBottom: 24 },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 18 },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.surfaceAlt },
   dotActive: { backgroundColor: colors.accent, width: 22 },
@@ -286,5 +319,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  statCellPrimary: { borderColor: colors.warning, backgroundColor: colors.surfaceAlt },
   statVal: { fontFamily: font.display, fontSize: 20, color: colors.accent },
+  floatingNext: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
 });

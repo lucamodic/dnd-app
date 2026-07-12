@@ -100,9 +100,33 @@ export interface ResourceState {
   used: number;
 }
 
+export interface UserSummary {
+  id?: string;
+  _id?: string;
+  username: string;
+  displayName?: string;
+  role: "dm" | "player" | "admin" | "user";
+}
+
+export interface InventoryItem {
+  _id?: string;
+  text: string;
+  createdAt?: string;
+}
+
+export interface NoteSections {
+  general: string;
+  campaign: string;
+  npcs: string;
+  places: string;
+  other: string;
+}
+
 export interface Character {
   _id: string;
+  userId?: UserSummary | string;
   name: string;
+  imageBase64: string;
   level: number;
   maxHp: number;
   currentHp: number;
@@ -122,7 +146,9 @@ export interface Character {
   acBonus: number;
   initiativeBonus: number;
   weapon: string;
+  inventoryItems: InventoryItem[];
   notes: string;
+  noteSections: NoteSections;
   raceId: Race | string;
   classId: Clazz | string;
 }
@@ -132,9 +158,9 @@ export interface Participant {
   name: string;
   type: "player" | "monster";
   initiative: number;
-  hp: number;
-  tempHp: number;
-  maxHp: number;
+  hp?: number;
+  tempHp?: number;
+  maxHp?: number;
   ac: number;
   characterId?: string;
   ownerUserId?: string;
@@ -215,6 +241,15 @@ export const useCreateCharacter = () => {
   });
 };
 
+export const useCreateUser = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { username: string; password: string; displayName?: string }) =>
+      api<UserSummary>("/auth/users", { method: "POST", body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["characters"] }),
+  });
+};
+
 /** Tira características para una clase (4d6 drop lowest, repartidas por clase). */
 export const useRollStats = () =>
   useMutation({
@@ -252,7 +287,10 @@ export const useDeleteCharacter = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api(`/characters/${id}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["characters"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["characters"] });
+      qc.invalidateQueries({ queryKey: ["tracker"] });
+    },
   });
 };
 

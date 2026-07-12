@@ -1,4 +1,4 @@
-import { AbilityScores } from "@/api/hooks";
+import { AbilityScores, Clazz } from "@/api/hooks";
 
 export const abilityMod = (score: number): number => Math.floor((score - 10) / 2);
 
@@ -26,6 +26,19 @@ export const ABILITY_ORDER: (keyof AbilityScores)[] = ["str", "dex", "con", "int
 
 export const spellLevelLabel = (level: number): string =>
   level === 0 ? "Truco" : `Nivel ${level}`;
+
+const normalizeAbilityText = (value: string): string =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+export const classHighlightsAbility = (cls: Clazz | null | undefined, ability: keyof AbilityScores): boolean => {
+  if (!cls) return false;
+  if (cls.savingThrows?.includes(ability)) return true;
+  const primary = normalizeAbilityText(cls.primaryAbility || "");
+  return primary.includes(normalizeAbilityText(ABILITY_FULL[ability]));
+};
 
 /** Array estándar de D&D 5e para asignar stats al crear (más fácil para principiantes). */
 export const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8];
