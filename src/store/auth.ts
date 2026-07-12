@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import * as SecureStore from "expo-secure-store";
+import { queryClient } from "@/api/queryClient";
 
 export interface AuthUser {
   id: string;
@@ -27,12 +28,18 @@ export const useAuth = create<AuthState>((set) => ({
   hydrated: false,
 
   setSession: async (token, user) => {
+    // Limpiamos el cache de react-query ANTES de guardar la sesión nueva: si no, al loguearse
+    // como otro usuario se seguían viendo (por un instante, hasta que algo más invalidara la
+    // query) los personajes/datos scoped al usuario anterior, porque el queryClient es un
+    // singleton que sobrevive al logout/login.
+    queryClient.clear();
     await SecureStore.setItemAsync(TOKEN_KEY, token);
     await SecureStore.setItemAsync(USER_KEY, JSON.stringify(user));
     set({ token, user });
   },
 
   logout: async () => {
+    queryClient.clear();
     await SecureStore.deleteItemAsync(TOKEN_KEY);
     await SecureStore.deleteItemAsync(USER_KEY);
     set({ token: null, user: null });

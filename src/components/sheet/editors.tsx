@@ -4,8 +4,12 @@ import { MotiView } from "moti";
 import { Ionicons } from "@expo/vector-icons";
 import { Text } from "@/components/Text";
 import { Button } from "@/components/Button";
+import { SkeletonCard } from "@/components/Skeleton";
+import { useSubclasses } from "@/api/hooks";
 import { ARMORS, ARMOR_CATEGORY_LABEL, ArmorCategory } from "@/data/armors";
 import { WEAPON_CATEGORY_LABEL, WeaponCategory, Weapon } from "@/data/weapons";
+import { abilityMod, formatMod } from "@/lib/format";
+import { rollDie } from "@/lib/dice";
 import { colors, font, radius, shadow } from "@/theme";
 
 /* ---------- Editor numérico genérico (HP máx, característica, iniciativa...) ---------- */
@@ -161,6 +165,94 @@ function BonusStep({ icon, onPress }: { icon: keyof typeof Ionicons.glyphMap; on
   );
 }
 
+/* ---------- Modal de especialidad/subclase ---------- */
+export function SubclassModal({
+  visible,
+  classIndex,
+  subclassLevel,
+  currentLevel,
+  selected,
+  onClose,
+  onSave,
+  loading,
+}: {
+  visible: boolean;
+  classIndex?: string;
+  subclassLevel: number;
+  currentLevel: number;
+  selected?: string;
+  onClose: () => void;
+  onSave: (subclassIndex: string) => void;
+  loading?: boolean;
+}) {
+  const { data: subclasses, isLoading } = useSubclasses(classIndex);
+  const [sel, setSel] = useState(selected || "");
+  const disabled = currentLevel < subclassLevel;
+
+  useEffect(() => {
+    if (visible) setSel(selected || "");
+  }, [visible, selected]);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.sheetBackdrop}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} />
+        <View style={styles.bottomSheet}>
+          <View style={styles.handle} />
+          <Text variant="title" style={{ marginBottom: 4 }}>Especialidad</Text>
+          <Text variant="caption" style={{ marginBottom: 10 }}>
+            Elegí el camino de tu clase. Se habilita a nivel {subclassLevel}.
+          </Text>
+
+          <ScrollView style={{ maxHeight: 390 }} showsVerticalScrollIndicator={false}>
+            {isLoading && Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)}
+            {(subclasses || []).map((subclass) => {
+              const active = sel === subclass.index;
+              return (
+                <Pressable
+                  key={subclass.index}
+                  onPress={() => !disabled && setSel(subclass.index)}
+                  disabled={disabled}
+                  style={[styles.armorRow, active && styles.armorRowActive, disabled && { opacity: 0.55 }]}
+                >
+                  <Ionicons
+                    name={active ? "radio-button-on" : "radio-button-off"}
+                    size={18}
+                    color={active ? colors.accent : colors.muted}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Text variant="subtitle" style={{ fontSize: 14, flex: 1 }}>{subclass.name}</Text>
+                      <View style={styles.levelChip}>
+                        <Text style={styles.levelChipText}>N{internalLevel(subclass.subclassLevel)}</Text>
+                      </View>
+                    </View>
+                    <Text variant="caption">{subclass.description}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+            {!isLoading && !subclasses?.length && (
+              <Text variant="body" style={{ paddingVertical: 12 }}>No hay especialidades cargadas para esta clase.</Text>
+            )}
+          </ScrollView>
+
+          <Button
+            label="Elegir especialidad"
+            icon="checkmark"
+            onPress={() => sel && onSave(sel)}
+            disabled={!sel || disabled}
+            loading={loading}
+            style={{ marginTop: 14 }}
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const internalLevel = (level: number) => String(level || 3);
+
 /* ---------- Modal de arma equipada ---------- */
 export function WeaponModal({
   visible,
@@ -175,10 +267,14 @@ export function WeaponModal({
   onClose: () => void;
   onSave: (weapon: string) => void;
 }) {
-  const [sel, setSel] = useState(weapon);
-  useEffect(() => {
-    if (visible) setSel(weapon);
-  }, [visible, weapon]);
+  // Tocar un arma la equipa al toque (no hace falta un botón "Guardar" aparte):
+  // antes había que elegir y después tocar Guardar, y si el usuario cerraba el
+  // modal tocando afuera se perdía la selección sin avisar. Así cambiar de arma
+  // es un solo toque y siempre se aplica.
+  const choose = (w: string) => {
+    onSave(w);
+    onClose();
+  };
 
   const categories: WeaponCategory[] = ["simple-melee", "simple-ranged", "martial-melee", "martial-ranged"];
 
@@ -190,15 +286,15 @@ export function WeaponModal({
           <View style={styles.handle} />
           <Text variant="title" style={{ marginBottom: 4 }}>Arma</Text>
           <Text variant="caption" style={{ marginBottom: 10 }}>
-            Elegí qué arma lleva tu personaje. El daño se calcula solo con el botón "Lanzar".
+            Tocá un arma para equipártela. El daño se calcula solo con el botón "Lanzar".
           </Text>
 
-          <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
-            <Pressable onPress={() => setSel("unarmed")} style={[styles.armorRow, sel === "unarmed" && styles.armorRowActive]}>
+          <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+            <Pressable onPress={() => choose("unarmed")} style={[styles.armorRow, weapon === "unarmed" && styles.armorRowActive]}>
               <Ionicons
-                name={sel === "unarmed" ? "radio-button-on" : "radio-button-off"}
+                name={weapon === "unarmed" ? "radio-button-on" : "radio-button-off"}
                 size={18}
-                color={sel === "unarmed" ? colors.accent : colors.muted}
+                color={weapon === "unarmed" ? colors.accent : colors.muted}
               />
               <View style={{ flex: 1 }}>
                 <Text variant="subtitle" style={{ fontSize: 14 }}>Golpe sin arma</Text>
@@ -212,9 +308,9 @@ export function WeaponModal({
                   {WEAPON_CATEGORY_LABEL[cat].toUpperCase()}
                 </Text>
                 {weapons.filter((w) => w.category === cat && w.index !== "unarmed" && !w.properties.includes("Natural") && !w.properties.includes("Racial")).map((w) => {
-                  const active = sel === w.index;
+                  const active = weapon === w.index;
                   return (
-                    <Pressable key={w.index} onPress={() => setSel(w.index)} style={[styles.armorRow, active && styles.armorRowActive]}>
+                    <Pressable key={w.index} onPress={() => choose(w.index)} style={[styles.armorRow, active && styles.armorRowActive]}>
                       <Ionicons
                         name={active ? "radio-button-on" : "radio-button-off"}
                         size={18}
@@ -233,12 +329,185 @@ export function WeaponModal({
               </View>
             ))}
           </ScrollView>
-
-          <Button label="Guardar" icon="checkmark" onPress={() => { onSave(sel); onClose(); }} style={{ marginTop: 14 }} />
         </View>
       </View>
     </Modal>
   );
+}
+
+/* ---------- Descanso corto / largo ---------- */
+export function RestModal({
+  visible,
+  mode,
+  maxHp,
+  hitDie,
+  level,
+  hitDiceUsed,
+  conScore,
+  onClose,
+  onFullRest,
+  onShortRest,
+  fullRestLoading,
+  shortRestLoading,
+}: {
+  visible: boolean;
+  mode: "full" | "short" | null;
+  maxHp: number;
+  hitDie: number;
+  level: number;
+  hitDiceUsed: number;
+  conScore: number;
+  onClose: () => void;
+  onFullRest: () => void;
+  onShortRest: (rolls: number[]) => void;
+  fullRestLoading?: boolean;
+  shortRestLoading?: boolean;
+}) {
+  const remaining = Math.max(0, level - (hitDiceUsed || 0));
+  const conMod = abilityMod(conScore);
+  const [diceCount, setDiceCount] = useState(1);
+  const [rollMode, setRollMode] = useState<"app" | "manual">("app");
+  const [rolls, setRolls] = useState<number[]>([]);
+
+  useEffect(() => {
+    if (visible && mode === "short") {
+      setDiceCount(Math.min(1, remaining) || 1);
+      setRolls([]);
+      setRollMode("app");
+    }
+  }, [visible, mode]);
+
+  const changeCount = (next: number) => {
+    setDiceCount(Math.max(1, Math.min(remaining, next)));
+    setRolls([]);
+  };
+
+  const rollInApp = () => setRolls(Array.from({ length: diceCount }, () => rollDie(hitDie)));
+
+  const setManualRoll = (i: number, v: string) => {
+    const n = Math.max(1, Math.min(hitDie, parseInt(v, 10) || 0));
+    setRolls((prev) => {
+      const next = [...prev];
+      next[i] = n;
+      return next;
+    });
+  };
+
+  const rollsReady = rolls.length === diceCount && rolls.every((r) => r >= 1 && r <= hitDie);
+  const projectedHeal = rolls.reduce((sum, r) => sum + Math.max(0, r + conMod), 0);
+
+  if (mode === "full") {
+    return (
+      <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+        <Pressable style={styles.backdrop} onPress={onClose}>
+          <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+            <Ionicons name="moon" size={28} color={colors.accent} style={{ alignSelf: "center", marginBottom: 8 }} />
+            <Text variant="title" center>Descanso largo</Text>
+            <Text variant="body" center style={{ marginTop: 8 }}>
+              Recuperás toda tu vida ({maxHp}/{maxHp}), todos tus dados de golpe, espacios de hechizo y recursos
+              (furias, ki, puntos de hechicería, etc).
+            </Text>
+            <Button label="Descansar" icon="moon" onPress={onFullRest} loading={fullRestLoading} style={{ marginTop: 18 }} />
+          </Pressable>
+        </Pressable>
+      </Modal>
+    );
+  }
+
+  if (mode === "short") {
+    return (
+      <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+        <View style={styles.sheetBackdrop}>
+          <Pressable style={{ flex: 1 }} onPress={onClose} />
+          <View style={styles.bottomSheet}>
+            <View style={styles.handle} />
+            <Text variant="title" style={{ marginBottom: 4 }}>Descanso corto</Text>
+
+            {remaining === 0 ? (
+              <Text variant="body" style={{ marginTop: 8 }}>
+                No te quedan dados de golpe (d{hitDie}). Hacé un descanso largo para recuperarlos.
+              </Text>
+            ) : (
+              <>
+                <Text variant="caption" style={{ marginBottom: 14 }}>
+                  Te quedan {remaining} dado{remaining === 1 ? "" : "s"} de golpe (d{hitDie}). Elegí cuántos gastar:
+                  cada uno cura 1d{hitDie} {formatMod(conMod)}.
+                </Text>
+
+                <View style={styles.bonusRow}>
+                  <Pressable style={styles.bonusStep} onPress={() => changeCount(diceCount - 1)}>
+                    <Ionicons name="remove" size={16} color={colors.text} />
+                  </Pressable>
+                  <Text style={styles.bonusVal}>{diceCount}</Text>
+                  <Pressable style={styles.bonusStep} onPress={() => changeCount(diceCount + 1)}>
+                    <Ionicons name="add" size={16} color={colors.text} />
+                  </Pressable>
+                </View>
+
+                <Pressable
+                  onPress={() => { setRollMode("app"); setRolls([]); }}
+                  style={[styles.armorRow, rollMode === "app" && styles.armorRowActive]}
+                >
+                  <Ionicons name={rollMode === "app" ? "radio-button-on" : "radio-button-off"} size={18} color={rollMode === "app" ? colors.accent : colors.muted} />
+                  <Text variant="body" style={{ fontSize: 14 }}>Tirar los dados en la app</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => { setRollMode("manual"); setRolls([]); }}
+                  style={[styles.armorRow, rollMode === "manual" && styles.armorRowActive]}
+                >
+                  <Ionicons name={rollMode === "manual" ? "radio-button-on" : "radio-button-off"} size={18} color={rollMode === "manual" ? colors.accent : colors.muted} />
+                  <Text variant="body" style={{ fontSize: 14 }}>Ya tiré en la vida real, cargo el resultado</Text>
+                </Pressable>
+
+                {rollMode === "app" ? (
+                  <Button
+                    label={rolls.length ? "Volver a tirar" : `Tirar ${diceCount}d${hitDie}`}
+                    icon="dice"
+                    variant="secondary"
+                    onPress={rollInApp}
+                    style={{ marginTop: 10 }}
+                  />
+                ) : (
+                  <View style={{ marginTop: 10, gap: 8 }}>
+                    {Array.from({ length: diceCount }).map((_, i) => (
+                      <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                        <Text variant="caption" style={{ width: 56 }}>Dado {i + 1}</Text>
+                        <TextInput
+                          keyboardType="number-pad"
+                          placeholder={`1-${hitDie}`}
+                          placeholderTextColor={colors.textFaint}
+                          value={rolls[i] ? String(rolls[i]) : ""}
+                          onChangeText={(v) => setManualRoll(i, v)}
+                          style={styles.restInput}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {rollsReady && (
+                  <Text variant="body" center style={{ marginTop: 14 }}>
+                    Resultados: {rolls.join(", ")} ({formatMod(conMod)} por dado) → curás {projectedHeal} PV
+                  </Text>
+                )}
+
+                <Button
+                  label="Confirmar descanso corto"
+                  icon="checkmark"
+                  onPress={() => onShortRest(rolls)}
+                  loading={shortRestLoading}
+                  disabled={!rollsReady}
+                  style={{ marginTop: 14 }}
+                />
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
+  return null;
 }
 
 const styles = StyleSheet.create({
@@ -256,4 +525,16 @@ const styles = StyleSheet.create({
   bonusRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6 },
   bonusStep: { width: 32, height: 32, borderRadius: radius.sm, backgroundColor: colors.surfaceAlt, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border },
   bonusVal: { fontFamily: font.display, fontSize: 18, color: colors.accent, minWidth: 42, textAlign: "center" },
+  levelChip: { backgroundColor: colors.primary, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 3 },
+  levelChipText: { fontFamily: font.bodyBold, fontSize: 10, color: colors.text },
+  restInput: {
+    flex: 1,
+    backgroundColor: colors.bg,
+    borderRadius: radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    color: colors.text,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
 });

@@ -22,7 +22,9 @@ import {
   useTracker,
   useTrackerPatch,
   useTrackerRemove,
-  useTrackerSettings,
+  useChooseSubclass,
+  useFullRest,
+  useShortRest,
   Character,
   Clazz,
   Participant,
@@ -38,7 +40,7 @@ import { RaceImage } from "@/components/RaceImage";
 import { rollNotation } from "@/lib/dice";
 import { CONDITION_OPTIONS, conditionLabel } from "@/lib/conditions";
 import { Section } from "@/components/sheet/Section";
-import { NumberEditorModal, ArmorModal } from "@/components/sheet/editors";
+import { NumberEditorModal, ArmorModal, SubclassModal, RestModal } from "@/components/sheet/editors";
 import {
   InventorySection,
   WeaponSection,
@@ -61,10 +63,14 @@ export default function CharacterSheet() {
 
   const setHp = useSetHp(id);
   const updateChar = useUpdateCharacter(id);
+  const fullRest = useFullRest(id);
+  const shortRest = useShortRest(id);
+  const [restMode, setRestMode] = useState<"full" | "short" | null>(null);
   const join = useTrackerJoin();
   const removeParticipant = useTrackerRemove();
-  const trackerSettings = useTrackerSettings();
+  const chooseSubclass = useChooseSubclass(id);
   const [levelUpOpen, setLevelUpOpen] = useState(false);
+  const [subclassOpen, setSubclassOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [joined, setJoined] = useState(false);
   const [hpEditOpen, setHpEditOpen] = useState(false);
@@ -104,6 +110,10 @@ export default function CharacterSheet() {
   const inCombat = !!trackerParticipant;
   const isDM = user?.role === "dm" || user?.role === "admin";
   const canLevelUp = isDM || !!tracker?.levelUpEnabled;
+  const needsSubclass = !!cls && character.level >= (cls.subclassLevel || 3) && !character.subclassIndex;
+  const subclassBonusSpells = (character.subclassBonusSpells || [])
+    .filter((s): s is Spell => !!s && typeof s === "object" && "level" in s)
+    .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
 
   const pickCharacterImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -177,6 +187,11 @@ export default function CharacterSheet() {
         <Text variant="caption" center>
           {race?.name} · {cls?.name} · Nivel {character.level}
         </Text>
+        {!!character.subclassName && (
+          <Text variant="caption" center color={colors.accent}>
+            Especialidad: {character.subclassName}
+          </Text>
+        )}
       </View>
 
       {/* HP */}
@@ -210,6 +225,14 @@ export default function CharacterSheet() {
           <TempHpButton value={character.tempHp || 0} onPress={() => setTempHpEditOpen(true)} />
           <FullHpButton onPress={() => updateChar.mutate({ currentHp: character.maxHp })} />
         </View>
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+          <View style={{ flex: 1 }}>
+            <Button label="Descanso corto" icon="cafe" variant="secondary" small onPress={() => setRestMode("short")} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Button label="Descanso largo" icon="moon" variant="secondary" small onPress={() => setRestMode("full")} />
+          </View>
+        </View>
       </Card>
 
       {/* Level up + Add to combat */}
@@ -233,22 +256,26 @@ export default function CharacterSheet() {
           />
         </View>
       </View>
-      {isDM ? (
-        <Pressable
-          onPress={() => trackerSettings.mutate({ levelUpEnabled: !tracker?.levelUpEnabled })}
-          style={styles.levelGateRow}
-        >
-          <Ionicons name={tracker?.levelUpEnabled ? "checkbox" : "square-outline"} size={20} color={tracker?.levelUpEnabled ? colors.accent : colors.muted} />
-          <Text variant="caption" style={{ flex: 1 }}>Permitir que los players suban de nivel</Text>
-        </Pressable>
-      ) : !canLevelUp ? (
-        <Text variant="caption" center style={{ marginTop: 8 }}>El DM todavía no habilitó la subida de nivel.</Text>
-      ) : null}
+      {!isDM && !canLevelUp && (
+        <Text variant="caption" center style={{ marginTop: 8 }}>
+          El DM todavía no habilitó la subida de nivel. Podés activarlo desde tu perfil.
+        </Text>
+      )}
 
       <HeroTabs active={tab} onChange={setTab} />
 
       {tab === "main" && (
         <>
+          {needsSubclass && (
+            <Pressable onPress={() => setSubclassOpen(true)} style={styles.subclassBanner}>
+              <Ionicons name="sparkles" size={16} color={colors.warning} />
+              <View style={{ flex: 1 }}>
+                <Text variant="subtitle" style={{ fontSize: 15 }}>Elegí tu especialidad</Text>
+                <Text variant="caption">Tu clase ya llegó al nivel para elegir su camino.</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+            </Pressable>
+          )}
           <View style={styles.quickRow}>
             <QuickStat icon="shield" label="CA" value={ac} onPress={() => setArmorOpen(true)} onInfo={() => setInfoModal({ title: "Clase de Armadura", body: "La CA es el número que el enemigo tiene que igualar o superar para pegarte." })} />
             <QuickStat icon="flash" label="Iniciativa" value={formatMod(init)} onPress={() => setInitEditOpen(true)} onInfo={() => setInfoModal({ title: "Iniciativa", body: "Se tira al empezar combate para decidir el orden de turnos." })} />
@@ -313,6 +340,24 @@ export default function CharacterSheet() {
                 if (!spells.length) return null;
                 return <View key={lvl}><Text variant="label" style={{ marginTop: 14, marginBottom: 8 }}>{spellLevelLabel(lvl).toUpperCase()}</Text>{spells.map((s, i) => <SpellRow key={s._id} spell={s} delay={i * 25} character={character} update={updateChar.mutate} onConcentrationInfo={() => setInfoModal(CONCENTRATION_INFO)} />)}</View>;
               })}
+              {subclassBonusSpells.length > 0 && (
+                <View>
+                  <Text variant="label" style={{ marginTop: 18, marginBottom: 8 }}>
+                    CONJUROS DE TU ESPECIALIDAD
+                  </Text>
+                  <Text variant="caption" style={{ marginBottom: 10 }}>Siempre preparados. No cuentan contra tus límites.</Text>
+                  {subclassBonusSpells.map((s, i) => (
+                    <SpellRow
+                      key={s._id}
+                      spell={s}
+                      delay={i * 25}
+                      character={character}
+                      update={updateChar.mutate}
+                      onConcentrationInfo={() => setInfoModal(CONCENTRATION_INFO)}
+                    />
+                  ))}
+                </View>
+              )}
             </>
           )}
         </>
@@ -356,6 +401,9 @@ export default function CharacterSheet() {
         onClose={() => setLevelUpOpen(false)}
         hitDie={character.hitDie}
         characterId={id}
+        onNeedsSubclass={() => setSubclassOpen(true)}
+        subclassLevel={cls?.subclassLevel || 3}
+        hasSubclass={!!character.subclassIndex}
       />
       <DeleteModal id={id} open={deleteOpen} onClose={() => setDeleteOpen(false)} />
 
@@ -402,6 +450,20 @@ export default function CharacterSheet() {
           abilityEdit && updateChar.mutate({ abilityScores: { ...character.abilityScores, [abilityEdit]: v } })
         }
       />
+      <RestModal
+        visible={restMode !== null}
+        mode={restMode}
+        maxHp={character.maxHp}
+        hitDie={character.hitDie}
+        level={character.level}
+        hitDiceUsed={character.hitDiceUsed || 0}
+        conScore={character.abilityScores.con}
+        onClose={() => setRestMode(null)}
+        onFullRest={async () => { await fullRest.mutateAsync(); setRestMode(null); }}
+        onShortRest={async (rolls) => { await shortRest.mutateAsync(rolls); setRestMode(null); }}
+        fullRestLoading={fullRest.isPending}
+        shortRestLoading={shortRest.isPending}
+      />
       <ArmorModal
         visible={armorOpen}
         armor={character.armor}
@@ -409,6 +471,19 @@ export default function CharacterSheet() {
         acBonus={character.acBonus}
         onClose={() => setArmorOpen(false)}
         onSave={(patch) => updateChar.mutate(patch)}
+      />
+      <SubclassModal
+        visible={subclassOpen}
+        classIndex={cls?.index}
+        subclassLevel={cls?.subclassLevel || 3}
+        currentLevel={character.level}
+        selected={character.subclassIndex}
+        onClose={() => setSubclassOpen(false)}
+        loading={chooseSubclass.isPending}
+        onSave={async (subclassIndex) => {
+          await chooseSubclass.mutateAsync(subclassIndex);
+          setSubclassOpen(false);
+        }}
       />
     </Screen>
   );
@@ -814,14 +889,20 @@ function LevelUpModal({
   onClose,
   hitDie,
   characterId,
+  onNeedsSubclass,
+  subclassLevel,
+  hasSubclass,
 }: {
   visible: boolean;
   onClose: () => void;
   hitDie: number;
   characterId: string;
+  onNeedsSubclass?: () => void;
+  subclassLevel: number;
+  hasSubclass: boolean;
 }) {
   const levelUp = useLevelUp(characterId);
-  const [result, setResult] = useState<{ roll: number; gained: number; level: number } | null>(null);
+  const [result, setResult] = useState<{ roll: number; gained: number; level: number; needsSubclass: boolean } | null>(null);
   const [manualRoll, setManualRoll] = useState("");
 
   useEffect(() => {
@@ -830,8 +911,19 @@ function LevelUpModal({
 
   const doLevelUp = async (rolled?: number) => {
     const res = await levelUp.mutateAsync(rolled);
-    setResult({ roll: res.roll, gained: res.gained, level: res.character.level });
+    setResult({
+      roll: res.roll,
+      gained: res.gained,
+      level: res.character.level,
+      needsSubclass: !hasSubclass && res.character.level >= subclassLevel && !res.character.subclassIndex,
+    });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const closeResult = () => {
+    const openSubclass = !!result?.needsSubclass;
+    onClose();
+    if (openSubclass) setTimeout(() => onNeedsSubclass?.(), 250);
   };
 
   const rollInApp = () => {
@@ -898,7 +990,7 @@ function LevelUpModal({
               <Text variant="caption" center>
                 Tiraste {result.roll} en el d{hitDie}
               </Text>
-              <Button label="¡Genial!" icon="checkmark" onPress={onClose} style={{ marginTop: 18 }} />
+              <Button label={result.needsSubclass ? "Elegir especialidad" : "¡Genial!"} icon="checkmark" onPress={closeResult} style={{ marginTop: 18 }} />
             </MotiView>
           )}
         </MotiView>
@@ -975,17 +1067,16 @@ const styles = StyleSheet.create({
   hpBtn: { flex: 1, paddingVertical: 12, borderRadius: radius.md, alignItems: "center" },
   hpBtnDark: { backgroundColor: colors.primary },
   hpBtnLight: { backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
-  levelGateRow: {
+  subclassBanner: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    marginTop: 8,
-    backgroundColor: colors.surface,
+    gap: 10,
+    backgroundColor: colors.warning + "18",
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderColor: colors.warning + "55",
+    padding: 12,
+    marginTop: 18,
   },
   heroTabs: {
     flexDirection: "row",

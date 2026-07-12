@@ -38,9 +38,11 @@ src/
   api/hooks.ts             # hooks de react-query + tipos (espejo del backend)
   store/auth.ts            # zustand + secure-store
   lib/dice.ts              # parseo/tirada de notación de dados ("2d8", "1d6+3")
+  lib/conditions.ts        # estados/conditions D&D en español para el tracker
   lib/format.ts            # modificadores, labels de características, etc.
   lib/sheet.ts             # skills, salvaciones, progresión por nivel (slots/recursos/features)
   components/              # Screen, Text, Button, Card, HpBar, RollButton
+    Skeleton.tsx           # skeletons reutilizables para cargas de listas/cards
     dice/DiceProvider.tsx  # modal global de dados (useDice().roll("2d8"))
     sheet/                 # secciones de la ficha: Section, Pips, sections.tsx
                            # (monedas, competencias, salvaciones, rasgos, habilidades, recursos, slots)
@@ -52,6 +54,8 @@ src/
 
 ## Convenciones
 - **Todo el acceso a red** pasa por `src/api/hooks.ts` (react-query). No usar `fetch` suelto en pantallas.
+- Catálogos del backend (razas, clases, hechizos, armas) se consumen con hooks de `src/api/hooks.ts`.
+  Las armas tienen fallback local en `src/data/weapons.ts` para no romper combate si `/weapons` todavía no cargó.
 - Textos de cara al usuario, comentarios y nombres visibles en **español**.
 - Componentes de UI reutilizables viven en `src/components`; nada de estilos ad-hoc repetidos.
 - Para tirar dados desde cualquier lado: `const { roll } = useDice(); roll("2d8", "Etiqueta")`.
@@ -63,8 +67,14 @@ src/
 ## Estado funcional reciente
 - Las imágenes de razas se consumen desde `imageBase64` cuando existe. En la ficha se usa `RaceImage` con
   `overflow: hidden` y foco superior de la imagen, no centrado.
-- Razas agregadas/curadas recientemente: goblin, aarakocra, orc y dragonborn, con fotos locales convertidas
-  a base64 en Mongo.
+- Razas agregadas/curadas: goblin, aarakocra, orc, kenku, kobold, shifter, dragonborn, satyr, tabaxi, firbolg,
+  fairy, changeling, aasimar, githyanki, harengon, sea-elf y tortle. Las fotos locales se convierten a base64
+  y se suben directo a Mongo (`imageBase64`) desde el backend; no dependen de una URL pública. Si una raza
+  nueva no tiene archivo local, debe usar fallback visual hasta que se agregue la imagen.
+- Razas MPMM usan `flexibleAbilityBonuses`: la app muestra "Aumento: +2/+1 flexible según clase" en el wizard,
+  y el backend aplica el bono al crear.
+- Usar skeletons (`SkeletonCard`) cuando cargan listas grandes o críticas: selección de razas, selección de clases
+  y `Gestionar hechizos`.
 - En creación de personaje, al pasar de raza a clase el scroll debe volver arriba.
 - La ficha muestra salvaciones dentro de habilidades/características, arma visible sin desplegable, combate cerca
   de vida, e información avanzada agrupada en rasgos de raza y habilidades de clase.
@@ -75,15 +85,54 @@ src/
   descuenta primero temporal. En la ficha, el control de vida temporal está debajo de los botones `-5 -1 +1 +5`,
   junto a un botón `Full vida`.
 - El tracker también recibe `tempHp` y sincroniza vida/vida temporal entre ficha y combate.
+- El tracker también tiene `conditions` por participante. Se muestran como chips en el tracker principal y en la
+  pestaña Tracker de la ficha. DM/admin puede editar estados de cualquier héroe/bicho; Players solo de sus héroes.
+  La lista estándar está en `src/lib/conditions.ts`.
 - El botón para entrar al tracker desde la ficha debe decir **Combatir**. La pestaña Tracker dentro de la
   ficha usa filas visualmente equivalentes al tracker principal y permite editar la iniciativa de participantes
   propios (también DM/admin). Si el backend oculta HP de monstruos u otros PJs, la app no debe mostrar textos
   tipo "PV ocultos" ni la CA de esos participantes.
 - Al borrar un personaje, invalidar también la query `tracker` para que desaparezca de iniciativa sin esperar
   el siguiente polling.
-- Las habilidades destacadas con borde dorado se calculan con `classHighlightsAbility`: deben incluir tanto
-  habilidades principales de la clase como salvaciones proficientes (`class.savingThrows`). Ejemplo: Druida
-  debe destacar Inteligencia y Sabiduría. Esto aplica a la ficha y al resumen del wizard de creación.
+- Las habilidades destacadas con borde dorado se calculan con `classHighlightsAbility` y dependen SOLO de
+  `class.savingThrows` (2 por clase, regla oficial). Antes también miraba el texto libre `primaryAbility`
+  ("Fuerza o Destreza" en Guerrero), lo que hacía que clases con característica principal flexible mostraran
+  3 destacadas en vez de 2 — se sacó esa parte porque confundía. `primaryAbility` se sigue mostrando aparte
+  como texto informativo. Esto aplica a la ficha y al resumen del wizard de creación.
+- El ojito de concentración en hechizos es tocable: al tocarlo debe abrir un modal explicando concentración sin
+  desplegar/cerrar la card del hechizo.
+- Las armas ahora vienen de Mongo por `GET /weapons` (`useWeapons`). La ficha mantiene fallback con
+  `src/data/weapons.ts`, pero todo lo nuevo debe ir a DB.
+- Si el usuario es DM/admin, en la sección de armas del héroe aparece `Crear arma`. Ese flujo llama `POST /weapons`,
+  crea el arma custom en Mongo y la equipa/asigna al personaje actual. Players no ven ese botón.
+- Las armas naturales/raciales (`natural-talons`, `dragonborn-breath`) existen en el catálogo y se suman por raza
+  con `naturalWeaponIndexesForRace`.
+- El `QueryClient` de react-query es un singleton exportado desde `src/api/queryClient.ts` (usado tanto por el
+  `QueryClientProvider` en `app/_layout.tsx` como por `src/store/auth.ts`). `setSession`/`logout` llaman
+  `queryClient.clear()`: sin eso, el cache (scoped a usuario, ej. "characters") sobrevivía entre sesiones y al
+  cambiar de usuario se veían por un instante los personajes del usuario anterior.
+- `WeaponSection` (`src/components/sheet/sections.tsx`) permite tener **varias armas a la vez**
+  (`character.weapons`, sin concepto de "una equipada"): botón "Agregar arma" suma una nueva a la lista;
+  tocar una card de arma existente abre `WeaponModal` para **reemplazar esa arma puntual** (no agrega otra);
+  cada arma no racial tiene una `X` para eliminarla, oculta si es la única que queda (siempre debe quedar
+  al menos una, salvo que tampoco tenga armas raciales). `WeaponModal` (`src/components/sheet/editors.tsx`)
+  aplica al toque (sin botón "Guardar" aparte) y no sabe si está agregando o reemplazando — eso lo decide
+  `WeaponSection` según qué slot disparó el picker (`pickerFor: string | "new" | null`). `character.weapon`
+  (campo legacy singular) se sigue mandando como `weapons[0]` por compatibilidad, pero ya no se usa para
+  mostrar un estado "equipada" en la UI.
+- El toggle "Permitir que los players suban de nivel" (`Tracker.levelUpEnabled`) vive en el **Perfil del DM**
+  (`app/(tabs)/profile.tsx`), no en la ficha de cada héroe — antes estaba repetido en cada personaje, lo que
+  no tenía sentido porque es una config global del tracker. La ficha solo muestra el aviso de "todavía no
+  habilitado" a los Players cuando corresponde.
+- Descanso corto/largo: botones en la card de vida de la ficha (`app/character/[id].tsx`) abren `RestModal`
+  (`src/components/sheet/editors.tsx`). Descanso largo llama `POST /characters/:id/full-rest` sin pedir nada
+  más. Descanso corto deja elegir cuántos dados de golpe gastar (tope = `level - hitDiceUsed`) y cómo
+  obtener cada resultado: "Tirar en la app" (usa `rollDie` de `src/lib/dice.ts`, no el modal global de
+  `useDice` porque ahí no se puede leer el resultado numérico) o cargar a mano lo que salió tirando en la
+  vida real; junto manda `POST /characters/:id/short-rest` con `{ rolls: number[] }`.
+- Bono racial flexible (+2/+1 de razas MPMM) en el wizard de creación: `raceAbilityBonusPreview` en
+  `src/lib/format.ts` muestra, ANTES de crear el personaje, en qué característica va a caer cada bono y por
+  qué (evita desperdiciar puntos contra el tope de 20 — replica `pickFlexibleRaceBonusTargets` del backend).
 
 ## Backlog solicitado / checklist de QA móvil
 Usar esta lista para validar en celular cuando se implementen los cambios pendientes:

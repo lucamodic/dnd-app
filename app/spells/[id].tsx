@@ -25,7 +25,7 @@ export default function ManageSpells() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data: character } = useCharacter(id);
   const cls = character?.classId as Clazz | undefined;
-  const { data: spells, isLoading } = useClassSpells(cls?._id);
+  const { data: spells, isLoading } = useClassSpells(cls?.spellListClassId ?? cls?._id);
   const update = useUpdateCharacter(id);
 
   // Estado local para feedback instantáneo al tocar (no dependemos del cache optimista,

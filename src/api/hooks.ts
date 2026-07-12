@@ -56,10 +56,37 @@ export interface Clazz {
   savingThrows: string[]; // ["str","con"]
   spellcasting: boolean;
   spellcastingAbility: string;
+  spellListClassId?: string;
   description: string;
+  subclassLevel: number;
   skillChoiceCount: number;
   skillOptions: string[];
+  abilityPriority: string[];
   progression: ClassLevel[];
+}
+
+export interface SubclassLevel {
+  level: number;
+  features: ClassFeature[];
+  spellSlots?: number[];
+  cantripsKnown?: number;
+  spellsKnown?: number;
+  resources?: ClassResource[];
+}
+
+export interface Subclass {
+  _id: string;
+  index: string;
+  classIndex: string;
+  name: string;
+  description: string;
+  subclassLevel: number;
+  source?: string;
+  spellcasting?: boolean;
+  spellcastingAbility?: string;
+  spellListClassIndex?: string;
+  progression: SubclassLevel[];
+  bonusSpells?: { level: number; spellIndexes: string[] }[];
 }
 
 export interface Spell {
@@ -163,11 +190,15 @@ export interface Character {
   initiativeBonus: number;
   weapon: string;
   weapons: string[];
+  hitDiceUsed: number;
   inventoryItems: InventoryItem[];
   notes: string;
   noteSections: NoteSections;
   raceId: Race | string;
   classId: Clazz | string;
+  subclassIndex: string;
+  subclassName?: string;
+  subclassBonusSpells?: Spell[];
 }
 
 export interface Participant {
@@ -205,6 +236,13 @@ export interface Monster {
 /* ---------- Catálogo ---------- */
 export const useRaces = () => useQuery({ queryKey: ["races"], queryFn: () => api<Race[]>("/races") });
 export const useClasses = () => useQuery({ queryKey: ["classes"], queryFn: () => api<Clazz[]>("/classes") });
+
+export const useSubclasses = (classIndex?: string) =>
+  useQuery({
+    queryKey: ["subclasses", classIndex],
+    queryFn: () => api<Subclass[]>(`/subclasses?classIndex=${classIndex}`),
+    enabled: !!classIndex,
+  });
 
 export const useClassSpells = (classId?: string) =>
   useQuery({
@@ -257,9 +295,21 @@ export const useUpdateCharacter = (id: string) => {
 export const useCreateCharacter = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { name: string; raceId: string; classId: string; abilityScores?: Partial<AbilityScores> }) =>
+    mutationFn: (body: { name: string; raceId: string; classId: string; subclassIndex?: string; abilityScores?: Partial<AbilityScores> }) =>
       api<Character>("/characters", { method: "POST", body }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["characters"] }),
+  });
+};
+
+export const useChooseSubclass = (id: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (subclassIndex: string) =>
+      api<Character>(`/characters/${id}/subclass`, { method: "POST", body: { subclassIndex } }),
+    onSuccess: (character) => {
+      qc.invalidateQueries({ queryKey: ["characters"] });
+      qc.invalidateQueries({ queryKey: ["character", character._id] });
+    },
   });
 };
 
@@ -327,6 +377,36 @@ export const useSetHp = (id: string) => {
     mutationFn: (currentHp: number) => api<Character>(`/characters/${id}/hp`, { method: "POST", body: { currentHp } }),
     onSuccess: (data) => {
       qc.setQueryData<Character>(["character", id], (prev) => (prev ? { ...prev, currentHp: data.currentHp } : prev));
+      qc.invalidateQueries({ queryKey: ["characters"] });
+      qc.invalidateQueries({ queryKey: ["tracker"] });
+    },
+  });
+};
+
+/** Descanso largo: vida al máximo, recursos/hechizos y dados de golpe recuperados. */
+export const useFullRest = (id: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<Character>(`/characters/${id}/full-rest`, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["character", id] });
+      qc.invalidateQueries({ queryKey: ["characters"] });
+      qc.invalidateQueries({ queryKey: ["tracker"] });
+    },
+  });
+};
+
+/** Descanso corto: gasta N dados de golpe (tirados en la app o a mano) y cura roll+CON por dado. */
+export const useShortRest = (id: string) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (rolls: number[]) =>
+      api<{ character: Character; healed: number }>(`/characters/${id}/short-rest`, {
+        method: "POST",
+        body: { rolls },
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["character", id] });
       qc.invalidateQueries({ queryKey: ["characters"] });
       qc.invalidateQueries({ queryKey: ["tracker"] });
     },

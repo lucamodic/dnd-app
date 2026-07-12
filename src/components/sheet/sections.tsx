@@ -31,56 +31,66 @@ const COINS: { key: keyof Character["currency"]; label: string; color: string }[
   { key: "cp", label: "Cobre", color: "#C08457" },
 ];
 
-/* ---------- Arma equipada ---------- */
+/* ---------- Armas (varias, cada una reemplazable/eliminable por separado) ---------- */
 export function WeaponSection({ character, cls, race, update }: { character: Character; cls: Clazz; race?: Race; update: UpdateFn }) {
   const user = useAuth((s) => s.user);
   const isDM = user?.role === "dm" || user?.role === "admin";
   const { data: dbWeapons } = useWeapons();
   const weapons = useMemo(() => (dbWeapons?.length ? dbWeapons : WEAPONS) as Weapon[], [dbWeapons]);
   const weaponByIndex = useMemo(() => ({ ...WEAPON_BY_INDEX, ...Object.fromEntries(weapons.map((w) => [w.index, w])) }), [weapons]);
-  const weapon = weaponByIndex[character.weapon] || weaponByIndex["unarmed"];
-  const needsWeapon = !character.weapon || character.weapon === "unarmed";
-  const [weaponOpen, setWeaponOpen] = useState(false);
+  // "new" = agregando un arma nueva a la lista; un índice = reemplazando esa arma puntual.
+  const [pickerFor, setPickerFor] = useState<string | "new" | null>(null);
   const [createWeaponOpen, setCreateWeaponOpen] = useState(false);
   const { roll } = useDice();
   const naturalWeapons = naturalWeaponIndexesForRace(race);
-  const ownedWeapons = Array.from(new Set([...(character.weapons || []), ...naturalWeapons, character.weapon].filter(Boolean)));
-  const attack = weaponAttackInfo(character, weapon);
-  const damageNotation = weapon.damageDice && weapon.damageDice.includes("d")
-    ? `${weapon.damageDice}${attack.abilityBonus >= 0 ? `+${attack.abilityBonus}` : attack.abilityBonus}`
-    : "";
+  const carriedWeapons = Array.from(new Set((character.weapons || []).filter(Boolean)));
+  const ownedWeapons = Array.from(new Set([...carriedWeapons, ...naturalWeapons]));
+  const needsWeapon = carriedWeapons.length === 0;
+
+  const replaceWeapon = (oldIndex: string | null, newIndex: string) => {
+    const next = oldIndex
+      ? carriedWeapons.map((w) => (w === oldIndex ? newIndex : w))
+      : [...carriedWeapons, newIndex];
+    const deduped = Array.from(new Set(next));
+    update({ weapons: deduped, weapon: deduped[0] || "unarmed" });
+  };
+
+  const removeWeapon = (index: string) => {
+    const next = carriedWeapons.filter((w) => w !== index);
+    update({ weapons: next, weapon: next[0] || "unarmed" });
+  };
 
   return (
     <View>
       {needsWeapon && (
         <View style={styles.weaponWarning}>
           <Ionicons name="warning" size={15} color={colors.warning} />
-          <Text variant="caption" color={colors.warning}>Seleccioná un arma para calcular bien ataque y daño.</Text>
+          <Text variant="caption" color={colors.warning}>Agregá un arma para calcular bien ataque y daño.</Text>
         </View>
       )}
       <View style={{ gap: 8 }}>
-        {ownedWeapons.length === 0 && <WeaponCard weaponIndex="unarmed" weaponByIndex={weaponByIndex} character={character} active roll={roll} />}
-        {ownedWeapons.map((weaponIndex) => (
-          <WeaponCard
-            key={weaponIndex}
-            weaponIndex={weaponIndex}
-            weaponByIndex={weaponByIndex}
-            character={character}
-            active={weaponIndex === character.weapon}
-            natural={naturalWeapons.includes(weaponIndex)}
-            roll={roll}
-            onEquip={() => update({ weapon: weaponIndex })}
-            onRemove={
-              naturalWeapons.includes(weaponIndex) || weaponIndex === character.weapon
-                ? undefined
-                : () => update({ weapons: ownedWeapons.filter((w) => w !== weaponIndex && !naturalWeapons.includes(w)) })
-            }
-          />
-        ))}
+        {ownedWeapons.length === 0 && (
+          <WeaponCard weaponIndex="unarmed" weaponByIndex={weaponByIndex} character={character} roll={roll} onChange={() => setPickerFor("new")} />
+        )}
+        {ownedWeapons.map((weaponIndex) => {
+          const natural = naturalWeapons.includes(weaponIndex);
+          return (
+            <WeaponCard
+              key={weaponIndex}
+              weaponIndex={weaponIndex}
+              weaponByIndex={weaponByIndex}
+              character={character}
+              natural={natural}
+              roll={roll}
+              onChange={natural ? undefined : () => setPickerFor(weaponIndex)}
+              onRemove={!natural && carriedWeapons.length > 1 ? () => removeWeapon(weaponIndex) : undefined}
+            />
+          );
+        })}
       </View>
       <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
         <View style={{ flex: 1 }}>
-          <Button label="Sumar arma" icon="add-circle" variant="secondary" small onPress={() => setWeaponOpen(true)} />
+          <Button label="Agregar arma" icon="add-circle" variant="secondary" small onPress={() => setPickerFor("new")} />
         </View>
         {isDM && (
           <View style={{ flex: 1 }}>
@@ -89,17 +99,17 @@ export function WeaponSection({ character, cls, race, update }: { character: Cha
         )}
       </View>
       <WeaponModal
-        visible={weaponOpen}
-        weapon={character.weapon}
+        visible={pickerFor !== null}
+        weapon={pickerFor && pickerFor !== "new" ? pickerFor : "unarmed"}
         weapons={weapons}
-        onClose={() => setWeaponOpen(false)}
-        onSave={(w) => update({ weapon: w, weapons: Array.from(new Set([...(character.weapons || []), w])) })}
+        onClose={() => setPickerFor(null)}
+        onSave={(w) => replaceWeapon(pickerFor && pickerFor !== "new" ? pickerFor : null, w)}
       />
       {isDM && (
         <CreateWeaponModal
           visible={createWeaponOpen}
           onClose={() => setCreateWeaponOpen(false)}
-          onCreated={(w) => update({ weapon: w, weapons: Array.from(new Set([...(character.weapons || []), w])) })}
+          onCreated={(w) => replaceWeapon(null, w)}
         />
       )}
     </View>
@@ -189,19 +199,17 @@ function WeaponCard({
   weaponIndex,
   weaponByIndex,
   character,
-  active,
   natural,
   roll,
-  onEquip,
+  onChange,
   onRemove,
 }: {
   weaponIndex: string;
   weaponByIndex: Record<string, Weapon>;
   character: Character;
-  active?: boolean;
   natural?: boolean;
   roll: (notation: string, label?: string) => void;
-  onEquip?: () => void;
+  onChange?: () => void;
   onRemove?: () => void;
 }) {
   const weapon = weaponByIndex[weaponIndex] || weaponByIndex["unarmed"];
@@ -210,7 +218,7 @@ function WeaponCard({
     ? `${weapon.damageDice}${attack.abilityBonus >= 0 ? `+${attack.abilityBonus}` : attack.abilityBonus}`
     : "";
   return (
-    <Pressable onPress={onEquip} disabled={!onEquip} style={[styles.weaponRow, active && styles.weaponRowActive]}>
+    <Pressable onPress={onChange} disabled={!onChange} style={styles.weaponRow}>
       <View style={styles.weaponIcon}>
         <Ionicons name={natural ? "sparkles" : "flash"} size={16} color={colors.accent} />
       </View>
@@ -238,7 +246,13 @@ function WeaponCard({
         </Pressable>
       )}
       {onRemove && (
-        <Pressable onPress={onRemove} hitSlop={8}>
+        <Pressable
+          onPress={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+          hitSlop={8}
+        >
           <Ionicons name="close" size={16} color={colors.textFaint} />
         </Pressable>
       )}
@@ -717,7 +731,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  weaponRowActive: { borderColor: colors.accent, backgroundColor: colors.primary + "44" },
   weaponIcon: {
     width: 34,
     height: 34,

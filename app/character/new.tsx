@@ -10,13 +10,13 @@ import { Text } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { SkeletonCard } from "@/components/Skeleton";
-import { useClasses, useRaces, useCreateCharacter, useRollStats, Race, Clazz, AbilityScores } from "@/api/hooks";
-import { abilityMod, classHighlightsAbility, formatMod, ABILITY_ORDER, ABILITY_LABELS, ABILITY_FULL } from "@/lib/format";
+import { useClasses, useRaces, useCreateCharacter, useRollStats, useSubclasses, Race, Clazz, AbilityScores, Subclass } from "@/api/hooks";
+import { abilityMod, classHighlightsAbility, formatMod, raceAbilityBonusPreview, ABILITY_ORDER, ABILITY_LABELS, ABILITY_FULL } from "@/lib/format";
 import { ClassIcon } from "@/components/ClassIcon";
 import { RaceImage } from "@/components/RaceImage";
 import { colors, font, radius } from "@/theme";
 
-type Step = 0 | 1 | 2;
+type Step = 0 | 1 | 2 | 3;
 
 export default function NewCharacter() {
   const { data: races, isLoading: racesLoading } = useRaces();
@@ -27,10 +27,13 @@ export default function NewCharacter() {
   const [step, setStep] = useState<Step>(0);
   const [race, setRace] = useState<Race | null>(null);
   const [cls, setCls] = useState<Clazz | null>(null);
+  const [subclass, setSubclass] = useState<Subclass | null>(null);
   const [name, setName] = useState("");
   const [stats, setStats] = useState<AbilityScores | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
+  const { data: subclasses, isLoading: subclassesLoading } = useSubclasses(cls?.index);
+  const bonusPreview = raceAbilityBonusPreview(race, cls, stats);
 
   useEffect(() => {
     requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
@@ -39,7 +42,7 @@ export default function NewCharacter() {
   // Al pasar al paso final, tiramos las características según la clase.
   const goToNaming = async () => {
     if (!cls) return;
-    setStep(2);
+    setStep(cls.subclassLevel === 1 ? 3 : 2);
     try {
       setStats(await rollStats.mutateAsync(cls._id));
     } catch {
@@ -53,6 +56,7 @@ export default function NewCharacter() {
       name: name.trim(),
       raceId: race._id,
       classId: cls._id,
+      ...(subclass ? { subclassIndex: subclass.index } : {}),
       ...(stats ? { abilityScores: stats } : {}),
     });
     router.replace(`/character/${character._id}`);
@@ -64,11 +68,11 @@ export default function NewCharacter() {
       <ScrollView
         ref={scrollRef}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.scrollContent, step < 2 && { paddingBottom: 150 + insets.bottom }]}
+        contentContainerStyle={[styles.scrollContent, step < (cls?.subclassLevel === 1 ? 3 : 2) && { paddingBottom: 150 + insets.bottom }]}
       >
         <View style={styles.header}>
           <Ionicons name="arrow-back" size={24} color={colors.text} onPress={() => (step === 0 ? router.back() : setStep((s) => (s - 1) as Step))} />
-          <StepDots step={step} />
+          <StepDots step={step} total={cls?.subclassLevel === 1 ? 4 : 3} />
           <View style={{ width: 24 }} />
         </View>
 
@@ -94,12 +98,30 @@ export default function NewCharacter() {
               </Text>
               {classesLoading && Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} />)}
               {classes?.map((c, i) => (
-                <ClassOption key={c._id} cls={c} selected={cls?._id === c._id} onPress={() => setCls(c)} delay={i * 40} />
+                <ClassOption key={c._id} cls={c} selected={cls?._id === c._id} onPress={() => { setCls(c); setSubclass(null); }} delay={i * 40} />
               ))}
             </MotiView>
           )}
 
-          {step === 2 && (
+          {step === 2 && cls?.subclassLevel === 1 && (
+            <MotiView key="subclass" {...slide} style={{ flex: 1 }}>
+              <Text variant="display">Elegí especialidad</Text>
+              <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
+                {cls.name} elige su camino desde nivel 1. Podés saltearlo y elegirlo después.
+              </Text>
+              {subclassesLoading && Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)}
+              {subclasses?.map((s, i) => (
+                <SubclassOption key={s.index} subclass={s} selected={subclass?.index === s.index} onPress={() => setSubclass(s)} delay={i * 40} />
+              ))}
+              {!subclassesLoading && !subclasses?.length && (
+                <Card>
+                  <Text variant="body">No hay especialidades cargadas para esta clase todavía.</Text>
+                </Card>
+              )}
+            </MotiView>
+          )}
+
+          {((step === 2 && cls?.subclassLevel !== 1) || step === 3) && (
             <MotiView key="name" {...slide} style={{ flex: 1 }}>
               <Text variant="display">¿Cómo se llama?</Text>
               <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
@@ -125,6 +147,11 @@ export default function NewCharacter() {
                 <Text variant="caption">
                   {race?.name} · {cls?.name} · Nivel 1
                 </Text>
+                {!!subclass && (
+                  <Text variant="caption" color={colors.accent}>
+                    Especialidad: {subclass.name}
+                  </Text>
+                )}
                 <View style={styles.summaryRow}>
                   <SummaryStat label="Dado de vida" value={`d${cls?.hitDie}`} />
                   <SummaryStat label="Velocidad" value={`${race?.speed} pies`} />
@@ -152,27 +179,45 @@ export default function NewCharacter() {
                   <ActivityIndicator color={colors.accent} />
                 ) : (
                   <View style={styles.statsGrid}>
-                  {ABILITY_ORDER.map((key) => (
+                  {ABILITY_ORDER.map((key) => {
+                    const raceBonus = bonusPreview.find((b) => b.ability === key)?.bonus || 0;
+                    const finalScore = stats ? Math.min(20, stats[key] + raceBonus) : undefined;
+                    return (
                       <View key={key} style={[styles.statCell, classHighlightsAbility(cls, key) && styles.statCellPrimary]}>
                         <Text variant="caption">{ABILITY_LABELS[key]}</Text>
-                        <Text style={styles.statVal}>{stats ? stats[key] : "—"}</Text>
+                        <Text style={styles.statVal}>{finalScore ?? (stats ? stats[key] : "—")}</Text>
                         <Text variant="caption" color={colors.textFaint}>
-                          {stats ? formatMod(abilityMod(stats[key])) : ""}
+                          {stats ? formatMod(abilityMod(finalScore ?? stats[key])) : ""}
                         </Text>
+                        {raceBonus > 0 && (
+                          <Text variant="caption" color={colors.warning}>
+                            Raza +{raceBonus}
+                          </Text>
+                        )}
                         {cls?.savingThrows?.includes(key) && (
                           <Text variant="caption" color={colors.accent}>
                             Salv prof.
                           </Text>
                         )}
                       </View>
-                    ))}
+                    );
+                  })}
                   </View>
                 )}
-                <Text variant="caption" style={{ marginTop: 8 }}>
-                  {race?.flexibleAbilityBonuses
-                    ? "Nota: esta raza suma +2/+1 flexible según tu clase al crear el personaje."
-                    : "Nota: la raza le suma sus bonos encima al crear el personaje."}
-                </Text>
+                {bonusPreview.length > 0 ? (
+                  <View style={{ marginTop: 8, gap: 2 }}>
+                    {bonusPreview.map((b) => (
+                      <Text key={b.ability} variant="caption" color={colors.textDim}>
+                        +{b.bonus} {ABILITY_FULL[b.ability]}
+                        {b.note ? ` — ${b.note}` : ""}
+                      </Text>
+                    ))}
+                  </View>
+                ) : (
+                  <Text variant="caption" style={{ marginTop: 8 }}>
+                    Esta raza no suma bonos de característica.
+                  </Text>
+                )}
               </Card>
 
               <Button
@@ -192,13 +237,17 @@ export default function NewCharacter() {
           )}
         </AnimatePresence>
       </ScrollView>
-      {step < 2 && (
+      {step < (cls?.subclassLevel === 1 ? 3 : 2) && (
         <View style={[styles.floatingNext, { bottom: 12 + insets.bottom }]}>
           <Button
-            label="Siguiente"
+            label={step === 2 ? "Continuar" : "Siguiente"}
             icon="arrow-forward"
-            onPress={() => (step === 0 ? setStep(1) : goToNaming())}
-            disabled={step === 0 ? !race : !cls}
+            onPress={() => {
+              if (step === 0) setStep(1);
+              else if (step === 1 && cls?.subclassLevel === 1) setStep(2);
+              else goToNaming();
+            }}
+            disabled={step === 0 ? !race : step === 1 ? !cls : false}
           />
         </View>
       )}
@@ -280,6 +329,26 @@ function ClassOption({ cls, selected, onPress, delay }: { cls: Clazz; selected: 
   );
 }
 
+function SubclassOption({ subclass, selected, onPress, delay }: { subclass: Subclass; selected: boolean; onPress: () => void; delay: number }) {
+  return (
+    <Card onPress={onPress} delay={delay} style={[styles.option, selected && styles.optionSelected]}>
+      <View style={styles.optionRow}>
+        <View style={styles.subclassDot}>
+          <Ionicons name="sparkles" size={22} color={colors.accent} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text variant="subtitle">{subclass.name}</Text>
+          <Text variant="caption">Se elige a nivel {subclass.subclassLevel}</Text>
+          <Text variant="body" numberOfLines={3} style={{ marginTop: 2, fontSize: 13 }}>
+            {subclass.description}
+          </Text>
+        </View>
+        {selected && <Ionicons name="checkmark-circle" size={22} color={colors.accent} />}
+      </View>
+    </Card>
+  );
+}
+
 function SummaryStat({ label, value }: { label: string; value: string }) {
   return (
     <View style={{ alignItems: "center" }}>
@@ -289,10 +358,10 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function StepDots({ step }: { step: number }) {
+function StepDots({ step, total }: { step: number; total: number }) {
   return (
     <View style={{ flexDirection: "row", gap: 8 }}>
-      {[0, 1, 2].map((i) => (
+      {Array.from({ length: total }).map((_, i) => (
         <View key={i} style={[styles.dot, i === step && styles.dotActive, i < step && styles.dotDone]} />
       ))}
     </View>
@@ -310,6 +379,7 @@ const styles = StyleSheet.create({
   optionRow: { flexDirection: "row", alignItems: "center", gap: 14 },
   raceImg: { width: 54, height: 54, borderRadius: radius.md, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   classDot: { width: 54, height: 54, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
+  subclassDot: { width: 54, height: 54, borderRadius: radius.md, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
   field: {
     flexDirection: "row",
     alignItems: "center",

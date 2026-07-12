@@ -4,7 +4,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import {
   useFonts,
   Cinzel_600SemiBold,
@@ -18,13 +18,10 @@ import {
 } from "@expo-google-fonts/inter";
 import { DiceProvider } from "@/components/dice/DiceProvider";
 import { useAuth } from "@/store/auth";
+import { queryClient } from "@/api/queryClient";
 import { colors } from "@/theme";
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
-
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
-});
 
 export default function RootLayout() {
   const hydrate = useAuth((s) => s.hydrate);
