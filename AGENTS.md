@@ -75,6 +75,15 @@ src/
   descuenta primero temporal. En la ficha, el control de vida temporal está debajo de los botones `-5 -1 +1 +5`,
   junto a un botón `Full vida`.
 - El tracker también recibe `tempHp` y sincroniza vida/vida temporal entre ficha y combate.
+- El botón para entrar al tracker desde la ficha debe decir **Combatir**. La pestaña Tracker dentro de la
+  ficha usa filas visualmente equivalentes al tracker principal y permite editar la iniciativa de participantes
+  propios (también DM/admin). Si el backend oculta HP de monstruos u otros PJs, la app no debe mostrar textos
+  tipo "PV ocultos" ni la CA de esos participantes.
+- Al borrar un personaje, invalidar también la query `tracker` para que desaparezca de iniciativa sin esperar
+  el siguiente polling.
+- Las habilidades destacadas con borde dorado se calculan con `classHighlightsAbility`: deben incluir tanto
+  habilidades principales de la clase como salvaciones proficientes (`class.savingThrows`). Ejemplo: Druida
+  debe destacar Inteligencia y Sabiduría. Esto aplica a la ficha y al resumen del wizard de creación.
 
 ## Backlog solicitado / checklist de QA móvil
 Usar esta lista para validar en celular cuando se implementen los cambios pendientes:
@@ -88,6 +97,7 @@ Usar esta lista para validar en celular cuando se implementen los cambios pendie
 - **Privacidad del tracker**
   - Players no ven la vida de bichos/monstruos.
   - Players solo ven vida de sus propios personajes.
+  - Players no ven la CA de bichos/monstruos ni textos de placeholder como "PV ocultos".
   - Players sí ven iniciativa y quién tiene el turno.
   - En combate se ve la vida temporal, pero no se puede sumar/editar vida temporal desde ahí.
   - Al tocar `+` o `-` en vida desde combate, aparece un input/modal para indicar cuánto curar o cuánto daño sacar.
@@ -116,9 +126,9 @@ Usar esta lista para validar en celular cuando se implementen los cambios pendie
   - Sección `Main`: contiene desde cabecera/vida hasta habilidades inclusive.
   - Donde diga "Características", cambiar a "Habilidades".
   - Usar nombres completos: Fuerza, Destreza, Constitución, Inteligencia, Sabiduría, Carisma.
-  - Destacar habilidades principales de la clase con borde diferente.
+  - Destacar habilidades principales y salvaciones proficientes de la clase con borde diferente.
   - Cualquier card de stat/resumen abre un mini modal explicando para qué sirve (velocidad, CA, tirada de salvación, etc.).
-  - Botón `Sumarme` cambia a `Sumarme al combate` o texto equivalente claro.
+  - Botón de entrada al tracker debe decir `Combatir`.
   - `Información adicional` queda en esta primera sección del nav.
   - `Tracker` también aparece como sección dentro del nav del héroe.
 
