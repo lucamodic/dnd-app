@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Dimensions, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { MotiView, AnimatePresence } from "moti";
 import { Ionicons } from "@expo/vector-icons";
-import { Character, Clazz, Race, ClassResource } from "@/api/hooks";
+import { Character, Clazz, Race, ClassResource, useCreateWeapon, useWeapons, WeaponCategory } from "@/api/hooks";
 import {
   SKILLS,
   skillModifier,
@@ -13,10 +13,11 @@ import {
   weaponAttackInfo,
 } from "@/lib/sheet";
 import { ABILITY_LABELS, formatMod } from "@/lib/format";
-import { naturalWeaponIndexesForRace, WEAPON_BY_INDEX } from "@/data/weapons";
+import { naturalWeaponIndexesForRace, WEAPON_BY_INDEX, WEAPONS, Weapon } from "@/data/weapons";
 import { Text } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { useDice } from "@/components/dice/DiceProvider";
+import { useAuth } from "@/store/auth";
 import { Pips } from "./Pips";
 import { WeaponModal } from "./editors";
 import { colors, font, radius } from "@/theme";
@@ -32,9 +33,15 @@ const COINS: { key: keyof Character["currency"]; label: string; color: string }[
 
 /* ---------- Arma equipada ---------- */
 export function WeaponSection({ character, cls, race, update }: { character: Character; cls: Clazz; race?: Race; update: UpdateFn }) {
-  const weapon = WEAPON_BY_INDEX[character.weapon] || WEAPON_BY_INDEX["unarmed"];
+  const user = useAuth((s) => s.user);
+  const isDM = user?.role === "dm" || user?.role === "admin";
+  const { data: dbWeapons } = useWeapons();
+  const weapons = useMemo(() => (dbWeapons?.length ? dbWeapons : WEAPONS) as Weapon[], [dbWeapons]);
+  const weaponByIndex = useMemo(() => ({ ...WEAPON_BY_INDEX, ...Object.fromEntries(weapons.map((w) => [w.index, w])) }), [weapons]);
+  const weapon = weaponByIndex[character.weapon] || weaponByIndex["unarmed"];
   const needsWeapon = !character.weapon || character.weapon === "unarmed";
   const [weaponOpen, setWeaponOpen] = useState(false);
+  const [createWeaponOpen, setCreateWeaponOpen] = useState(false);
   const { roll } = useDice();
   const naturalWeapons = naturalWeaponIndexesForRace(race);
   const ownedWeapons = Array.from(new Set([...(character.weapons || []), ...naturalWeapons, character.weapon].filter(Boolean)));
@@ -52,11 +59,12 @@ export function WeaponSection({ character, cls, race, update }: { character: Cha
         </View>
       )}
       <View style={{ gap: 8 }}>
-        {ownedWeapons.length === 0 && <WeaponCard weaponIndex="unarmed" character={character} active roll={roll} />}
+        {ownedWeapons.length === 0 && <WeaponCard weaponIndex="unarmed" weaponByIndex={weaponByIndex} character={character} active roll={roll} />}
         {ownedWeapons.map((weaponIndex) => (
           <WeaponCard
             key={weaponIndex}
             weaponIndex={weaponIndex}
+            weaponByIndex={weaponByIndex}
             character={character}
             active={weaponIndex === character.weapon}
             natural={naturalWeapons.includes(weaponIndex)}
@@ -70,19 +78,116 @@ export function WeaponSection({ character, cls, race, update }: { character: Cha
           />
         ))}
       </View>
-      <Button label="Sumar arma" icon="add-circle" variant="secondary" small onPress={() => setWeaponOpen(true)} style={{ marginTop: 10 }} />
+      <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
+        <View style={{ flex: 1 }}>
+          <Button label="Sumar arma" icon="add-circle" variant="secondary" small onPress={() => setWeaponOpen(true)} />
+        </View>
+        {isDM && (
+          <View style={{ flex: 1 }}>
+            <Button label="Crear arma" icon="hammer" variant="secondary" small onPress={() => setCreateWeaponOpen(true)} />
+          </View>
+        )}
+      </View>
       <WeaponModal
         visible={weaponOpen}
         weapon={character.weapon}
+        weapons={weapons}
         onClose={() => setWeaponOpen(false)}
         onSave={(w) => update({ weapon: w, weapons: Array.from(new Set([...(character.weapons || []), w])) })}
       />
+      {isDM && (
+        <CreateWeaponModal
+          visible={createWeaponOpen}
+          onClose={() => setCreateWeaponOpen(false)}
+          onCreated={(w) => update({ weapon: w, weapons: Array.from(new Set([...(character.weapons || []), w])) })}
+        />
+      )}
     </View>
+  );
+}
+
+function CreateWeaponModal({
+  visible,
+  onClose,
+  onCreated,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onCreated: (weaponIndex: string) => void;
+}) {
+  const createWeapon = useCreateWeapon();
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState<WeaponCategory>("simple-melee");
+  const [damageDice, setDamageDice] = useState("1d6");
+  const [damageType, setDamageType] = useState("Cortante");
+  const [properties, setProperties] = useState("");
+  const [description, setDescription] = useState("");
+
+  useEffect(() => {
+    if (!visible) return;
+    setName("");
+    setCategory("simple-melee");
+    setDamageDice("1d6");
+    setDamageType("Cortante");
+    setProperties("");
+    setDescription("");
+  }, [visible]);
+
+  const save = async () => {
+    if (!name.trim()) return;
+    const weapon = await createWeapon.mutateAsync({
+      name: name.trim(),
+      category,
+      damageDice: damageDice.trim(),
+      damageType: damageType.trim(),
+      properties: properties.split(",").map((p) => p.trim()).filter(Boolean),
+      description: description.trim(),
+    });
+    onCreated(weapon.index);
+    onClose();
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.sheetBackdrop}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} />
+        <View style={styles.itemSheet}>
+          <View style={styles.handle} />
+          <Text variant="title">Crear arma</Text>
+          <Text variant="caption" style={{ marginTop: 4, marginBottom: 12 }}>
+            Se agrega a Mongo y queda equipada en este personaje.
+          </Text>
+          <TextInput placeholder="Nombre" placeholderTextColor={colors.textFaint} value={name} onChangeText={setName} style={styles.itemInput} />
+          <View style={styles.weaponCategoryGrid}>
+            {(["simple-melee", "simple-ranged", "martial-melee", "martial-ranged"] as WeaponCategory[]).map((cat) => (
+              <Pressable key={cat} onPress={() => setCategory(cat)} style={[styles.weaponCategoryBtn, category === cat && styles.weaponCategoryBtnActive]}>
+                <Text style={styles.weaponCategoryText}>{cat.includes("ranged") ? "Dist." : "C/C"} {cat.includes("martial") ? "marcial" : "simple"}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <TextInput placeholder="Daño (1d6)" placeholderTextColor={colors.textFaint} value={damageDice} onChangeText={setDamageDice} style={[styles.itemInput, { flex: 1 }]} />
+            <TextInput placeholder="Tipo" placeholderTextColor={colors.textFaint} value={damageType} onChangeText={setDamageType} style={[styles.itemInput, { flex: 1 }]} />
+          </View>
+          <TextInput placeholder="Propiedades separadas por coma" placeholderTextColor={colors.textFaint} value={properties} onChangeText={setProperties} style={styles.itemInput} />
+          <TextInput
+            placeholder="Descripción"
+            placeholderTextColor={colors.textFaint}
+            value={description}
+            onChangeText={setDescription}
+            multiline
+            style={[styles.itemInput, styles.itemDescriptionInput]}
+          />
+          <Button label="Crear y dar" icon="checkmark" onPress={save} loading={createWeapon.isPending} disabled={!name.trim()} style={{ marginTop: 12 }} />
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
 function WeaponCard({
   weaponIndex,
+  weaponByIndex,
   character,
   active,
   natural,
@@ -91,6 +196,7 @@ function WeaponCard({
   onRemove,
 }: {
   weaponIndex: string;
+  weaponByIndex: Record<string, Weapon>;
   character: Character;
   active?: boolean;
   natural?: boolean;
@@ -98,7 +204,7 @@ function WeaponCard({
   onEquip?: () => void;
   onRemove?: () => void;
 }) {
-  const weapon = WEAPON_BY_INDEX[weaponIndex] || WEAPON_BY_INDEX["unarmed"];
+  const weapon = weaponByIndex[weaponIndex] || weaponByIndex["unarmed"];
   const attack = weaponAttackInfo(character, weapon);
   const damageNotation = weapon.damageDice && weapon.damageDice.includes("d")
     ? `${weapon.damageDice}${attack.abilityBonus >= 0 ? `+${attack.abilityBonus}` : attack.abilityBonus}`
@@ -272,6 +378,16 @@ function ItemModal({
 export function NotesSection({ character, update }: { character: Character; update: UpdateFn }) {
   const initial = character.noteSections || { general: character.notes || "", campaign: "", npcs: "", places: "", other: "" };
   const [notes, setNotes] = useState(initial);
+  const [page, setPage] = useState(0);
+  const [editingNote, setEditingNote] = useState(false);
+  const width = Dimensions.get("window").width - 40;
+  const tabs = [
+    ["general", "Generales"],
+    ["campaign", "Campaña"],
+    ["npcs", "NPCs"],
+    ["places", "Lugares"],
+    ["other", "Otros"],
+  ] as const;
 
   useEffect(() => {
     setNotes(character.noteSections || { general: character.notes || "", campaign: "", npcs: "", places: "", other: "" });
@@ -284,16 +400,29 @@ export function NotesSection({ character, update }: { character: Character; upda
   };
 
   return (
-    <View style={{ gap: 12, marginTop: 14 }}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 96 : 24}
+      style={{ gap: 12, marginTop: 14 }}
+    >
       <ScrollView
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         onMomentumScrollEnd={(e) => setPage(Math.round(e.nativeEvent.contentOffset.x / width))}
       >
         {tabs.map(([key, title]) => (
-          <View key={key} style={{ width }}>
-            <NoteBox title={title} value={notes[key]} onChange={(v) => save(key, v)} />
+          <View key={key} style={[styles.notePage, { width }]}>
+            <NoteBox
+              title={title}
+              value={notes[key]}
+              onFocus={() => setEditingNote(true)}
+              onChange={(v) => {
+                setEditingNote(false);
+                save(key, v);
+              }}
+            />
           </View>
         ))}
       </ScrollView>
@@ -303,11 +432,22 @@ export function NotesSection({ character, update }: { character: Character; upda
         ))}
       </View>
       <Text variant="caption" center>{tabs[page]?.[1]}</Text>
-    </View>
+      {editingNote && <View style={styles.keyboardSpacer} />}
+    </KeyboardAvoidingView>
   );
 }
 
-function NoteBox({ title, value, onChange }: { title: string; value: string; onChange: (v: string) => void }) {
+function NoteBox({
+  title,
+  value,
+  onChange,
+  onFocus,
+}: {
+  title: string;
+  value: string;
+  onChange: (v: string) => void;
+  onFocus?: () => void;
+}) {
   const [local, setLocal] = useState(value || "");
   useEffect(() => setLocal(value || ""), [value]);
   return (
@@ -317,6 +457,7 @@ function NoteBox({ title, value, onChange }: { title: string; value: string; onC
         multiline
         value={local}
         onChangeText={setLocal}
+        onFocus={onFocus}
         onBlur={() => onChange(local)}
         placeholder={`Notas de ${title.toLowerCase()}...`}
         placeholderTextColor={colors.textFaint}
@@ -654,10 +795,24 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderColor: colors.border,
   },
+  weaponCategoryGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  weaponCategoryBtn: {
+    width: "48%",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bg,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  weaponCategoryBtnActive: { borderColor: colors.accent, backgroundColor: colors.primary + "66" },
+  weaponCategoryText: { color: colors.text, fontFamily: font.bodyBold, fontSize: 12 },
   handle: { alignSelf: "center", width: 42, height: 5, borderRadius: 3, backgroundColor: colors.muted, marginBottom: 4 },
   sheetBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
   itemDescriptionInput: { minHeight: 110, paddingTop: 12 },
   noteDots: { flexDirection: "row", justifyContent: "center", gap: 6 },
+  notePage: { paddingHorizontal: 6 },
+  keyboardSpacer: { height: Platform.OS === "ios" ? 260 : 320 },
   noteDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.surfaceAlt },
   noteDotActive: { width: 20, backgroundColor: colors.accent },
   coinRow: { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -681,12 +836,3 @@ const styles = StyleSheet.create({
   infoResource: { flexDirection: "row", alignItems: "center", gap: 12 },
   infoValue: { fontFamily: font.display, fontSize: 22, color: colors.accent },
 });
-  const [page, setPage] = useState(0);
-  const width = Dimensions.get("window").width - 40;
-  const tabs = [
-    ["general", "Generales"],
-    ["campaign", "Campaña"],
-    ["npcs", "NPCs"],
-    ["places", "Lugares"],
-    ["other", "Otros"],
-  ] as const;

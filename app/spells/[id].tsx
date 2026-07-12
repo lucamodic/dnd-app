@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, StyleSheet, View } from "react-native";
 import { router, useLocalSearchParams, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -7,8 +7,10 @@ import { AnimatePresence, MotiView } from "moti";
 import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import { Card } from "@/components/Card";
+import { Button } from "@/components/Button";
+import { SkeletonCard } from "@/components/Skeleton";
 import { useCharacter, useClassSpells, useUpdateCharacter, Clazz, Spell } from "@/api/hooks";
-import { spellLevelLabel } from "@/lib/format";
+import { CONCENTRATION_INFO, spellLevelLabel } from "@/lib/format";
 import { maxUnlockedSpellLevel, cantripLimit, spellsKnownLimit } from "@/lib/sheet";
 import { colors, font, radius } from "@/theme";
 
@@ -33,6 +35,7 @@ export default function ManageSpells() {
   const [flashId, setFlashId] = useState<string | null>(null);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
+  const [infoModal, setInfoModal] = useState<{ title: string; body: string } | null>(null);
 
   useEffect(() => {
     if (!seeded && character?.knownSpells) {
@@ -127,7 +130,11 @@ export default function ManageSpells() {
         </View>
       )}
 
-      {isLoading && <ActivityIndicator color={colors.accent} style={{ marginTop: 30 }} />}
+      {isLoading && (
+        <View style={{ marginTop: 14 }}>
+          {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)}
+        </View>
+      )}
 
       {byLevel.map((group) => (
         <View key={group.level} style={{ marginBottom: 8 }}>
@@ -197,7 +204,7 @@ export default function ManageSpells() {
                           <InfoPill icon="time" label={spell.castingTime} />
                           <InfoPill icon="navigate" label={spell.range} />
                           <InfoPill icon="hourglass" label={spell.duration} />
-                          {spell.concentration && <InfoPill icon="eye" label="Concentración" />}
+                          {spell.concentration && <InfoPill icon="eye" label="Concentración" onPress={() => setInfoModal(CONCENTRATION_INFO)} />}
                           {spell.ritual && <InfoPill icon="book" label="Ritual" />}
                           {!!spell.damageType && <InfoPill icon="flame" label={`Daño: ${spell.damageType}`} />}
                           {!!spell.savingThrow && <InfoPill icon="shield-checkmark" label={`Salvación: ${spell.savingThrow}`} />}
@@ -216,16 +223,43 @@ export default function ManageSpells() {
           })}
         </View>
       ))}
+      <InfoModal info={infoModal} onClose={() => setInfoModal(null)} />
     </Screen>
   );
 }
 
-function InfoPill({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label?: string }) {
-  if (!label) return null;
+function InfoModal({ info, onClose }: { info: { title: string; body: string } | null; onClose: () => void }) {
   return (
-    <View style={styles.infoPill}>
+    <Modal visible={!!info} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <Card style={{ width: "100%", maxWidth: 340 }}>
+          <Text variant="title">{info?.title}</Text>
+          <Text variant="body" style={{ marginTop: 8 }}>{info?.body}</Text>
+          <Button label="Entendido" icon="checkmark" onPress={onClose} style={{ marginTop: 16 }} />
+        </Card>
+      </Pressable>
+    </Modal>
+  );
+}
+
+function InfoPill({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMap; label?: string; onPress?: () => void }) {
+  if (!label) return null;
+  const content = (
+    <>
       <Ionicons name={icon} size={12} color={colors.accent} />
       <Text variant="caption" color={colors.textDim}>{label}</Text>
+    </>
+  );
+  if (onPress) {
+    return (
+      <Pressable onPress={onPress} hitSlop={8} style={styles.infoPill}>
+        {content}
+      </Pressable>
+    );
+  }
+  return (
+    <View style={styles.infoPill}>
+      {content}
     </View>
   );
 }
@@ -259,6 +293,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
   },
   infoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
+  backdrop: { flex: 1, backgroundColor: colors.overlay, alignItems: "center", justifyContent: "center", padding: 24 },
   infoPill: {
     flexDirection: "row",
     alignItems: "center",

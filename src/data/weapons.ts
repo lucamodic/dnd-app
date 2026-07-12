@@ -57,7 +57,7 @@ export const WEAPONS: Weapon[] = [
   { index: "crossbow-heavy", name: "Ballesta Pesada", category: "martial-ranged", damageDice: "1d10", damageType: "Perforante", properties: ["Munición", "Pesada", "Carga lenta", "A dos manos"], description: "Pega fuerte a distancia, pero se recarga lento." },
   { index: "longbow", name: "Arco Largo", category: "martial-ranged", damageDice: "1d8", damageType: "Perforante", properties: ["Munición", "Pesada", "A dos manos"], description: "Llega lejos y pega fuerte. El arco de los expertos." },
   { index: "net", name: "Red", category: "martial-ranged", damageDice: "", damageType: "", properties: ["Arrojadiza", "Especial"], description: "No hace daño: atrapa al objetivo en vez de lastimarlo." },
-  { index: "natural-talons", name: "Garras", category: "simple-melee", damageDice: "1d6", damageType: "Cortante", properties: ["Natural"], description: "Ataque natural con garras o talones de la raza." },
+  { index: "natural-talons", name: "Garras", category: "simple-melee", damageDice: "1d6", damageType: "Cortante", properties: ["Natural", "Sutileza"], description: "Ataque natural con garras o talones de la raza. En esta mesa podés usar Fuerza o Destreza." },
   { index: "dragonborn-breath", name: "Aliento dracónico", category: "simple-ranged", damageDice: "2d6", damageType: "Elemental", properties: ["Racial", "Salvación"], description: "Ataque de aliento de dragonborn. El tipo y la salvación dependen de tu ascendencia dracónica." },
 ];
 

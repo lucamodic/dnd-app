@@ -33,6 +33,11 @@ export const ABILITY_DESCRIPTIONS: Record<keyof AbilityScores, string> = {
 
 export const ABILITY_ORDER: (keyof AbilityScores)[] = ["str", "dex", "con", "int", "wis", "cha"];
 
+export const CONCENTRATION_INFO = {
+  title: "Concentración",
+  body: "Algunos hechizos se mantienen activos mientras te concentrás. Solo podés concentrarte en un hechizo a la vez: si lanzás otro de concentración, se corta el anterior. Si recibís daño, normalmente tirás para no perderlo.",
+};
+
 export const spellLevelLabel = (level: number): string =>
   level === 0 ? "Truco" : `Nivel ${level}`;
 

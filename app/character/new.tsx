@@ -9,8 +9,9 @@ import { Screen } from "@/components/Screen";
 import { Text } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
+import { SkeletonCard } from "@/components/Skeleton";
 import { useClasses, useRaces, useCreateCharacter, useRollStats, Race, Clazz, AbilityScores } from "@/api/hooks";
-import { abilityMod, classHighlightsAbility, formatMod, ABILITY_ORDER, ABILITY_LABELS } from "@/lib/format";
+import { abilityMod, classHighlightsAbility, formatMod, ABILITY_ORDER, ABILITY_LABELS, ABILITY_FULL } from "@/lib/format";
 import { ClassIcon } from "@/components/ClassIcon";
 import { RaceImage } from "@/components/RaceImage";
 import { colors, font, radius } from "@/theme";
@@ -78,7 +79,7 @@ export default function NewCharacter() {
               <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
                 Define de dónde viene tu héroe y sus rasgos.
               </Text>
-              {racesLoading && <ActivityIndicator color={colors.accent} />}
+              {racesLoading && Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} avatar />)}
               {races?.map((r, i) => (
                 <RaceOption key={r._id} race={r} selected={race?._id === r._id} onPress={() => setRace(r)} delay={i * 40} />
               ))}
@@ -91,7 +92,7 @@ export default function NewCharacter() {
               <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
                 Tu rol en el grupo y cómo peleás.
               </Text>
-              {classesLoading && <ActivityIndicator color={colors.accent} />}
+              {classesLoading && Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} />)}
               {classes?.map((c, i) => (
                 <ClassOption key={c._id} cls={c} selected={cls?._id === c._id} onPress={() => setCls(c)} delay={i * 40} />
               ))}
@@ -168,7 +169,9 @@ export default function NewCharacter() {
                   </View>
                 )}
                 <Text variant="caption" style={{ marginTop: 8 }}>
-                  Nota: la raza le suma sus bonos encima al crear el personaje.
+                  {race?.flexibleAbilityBonuses
+                    ? "Nota: esta raza suma +2/+1 flexible según tu clase al crear el personaje."
+                    : "Nota: la raza le suma sus bonos encima al crear el personaje."}
                 </Text>
               </Card>
 
@@ -229,6 +232,9 @@ function RaceOption({ race, selected, onPress, delay }: { race: Race; selected: 
           <Text variant="body" numberOfLines={expanded ? undefined : 3} style={{ marginTop: 2, fontSize: 13 }}>
             {race.description}
           </Text>
+          <Text variant="caption" color={colors.textDim} style={{ marginTop: 4 }}>
+            {raceBonusText(race)}
+          </Text>
           <Pressable
             onPress={(e) => {
               e.stopPropagation();
@@ -244,6 +250,14 @@ function RaceOption({ race, selected, onPress, delay }: { race: Race; selected: 
       </View>
     </Card>
   );
+}
+
+function raceBonusText(race: Race) {
+  if (race.flexibleAbilityBonuses) return "Aumento: +2/+1 flexible según clase";
+  if (!race.abilityBonuses?.length) return "Aumento: sin bono fijo";
+  return `Aumento: ${race.abilityBonuses
+    .map((bonus) => `${ABILITY_FULL[bonus.ability as keyof typeof ABILITY_FULL] || bonus.ability} +${bonus.bonus}`)
+    .join(", ")}`;
 }
 
 function ClassOption({ cls, selected, onPress, delay }: { cls: Clazz; selected: boolean; onPress: () => void; delay: number }) {

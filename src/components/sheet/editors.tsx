@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Text } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { ARMORS, ARMOR_CATEGORY_LABEL, ArmorCategory } from "@/data/armors";
-import { WEAPONS, WEAPON_CATEGORY_LABEL, WeaponCategory } from "@/data/weapons";
+import { WEAPON_CATEGORY_LABEL, WeaponCategory, Weapon } from "@/data/weapons";
 import { colors, font, radius, shadow } from "@/theme";
 
 /* ---------- Editor numérico genérico (HP máx, característica, iniciativa...) ---------- */
@@ -165,11 +165,13 @@ function BonusStep({ icon, onPress }: { icon: keyof typeof Ionicons.glyphMap; on
 export function WeaponModal({
   visible,
   weapon,
+  weapons,
   onClose,
   onSave,
 }: {
   visible: boolean;
   weapon: string;
+  weapons: Weapon[];
   onClose: () => void;
   onSave: (weapon: string) => void;
 }) {
@@ -209,7 +211,7 @@ export function WeaponModal({
                 <Text variant="label" style={{ marginTop: 8, marginBottom: 4 }}>
                   {WEAPON_CATEGORY_LABEL[cat].toUpperCase()}
                 </Text>
-                {WEAPONS.filter((w) => w.category === cat && w.index !== "unarmed" && !w.properties.includes("Natural") && !w.properties.includes("Racial")).map((w) => {
+                {weapons.filter((w) => w.category === cat && w.index !== "unarmed" && !w.properties.includes("Natural") && !w.properties.includes("Racial")).map((w) => {
                   const active = sel === w.index;
                   return (
                     <Pressable key={w.index} onPress={() => setSel(w.index)} style={[styles.armorRow, active && styles.armorRowActive]}>

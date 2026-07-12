@@ -10,6 +10,7 @@ import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { HpBar } from "@/components/HpBar";
 import { NumberEditorModal } from "@/components/sheet/editors";
+import { CONDITION_OPTIONS, conditionLabel } from "@/lib/conditions";
 import {
   useTracker,
   useTrackerNext,
@@ -133,6 +134,7 @@ function ParticipantRow({
   const accent = participant.color || (isMonster ? colors.secondary : colors.accent);
   const [initEditOpen, setInitEditOpen] = useState(false);
   const [hpChange, setHpChange] = useState<"damage" | "heal" | null>(null);
+  const [conditionsOpen, setConditionsOpen] = useState(false);
   const canSeeHp = participant.hp !== undefined && participant.maxHp !== undefined;
 
   const changeHp = (amount: number, mode: "damage" | "heal") => {
@@ -205,13 +207,19 @@ function ParticipantRow({
         ) : (
           null
         )}
+        <ConditionChips conditions={participant.conditions || []} />
       </View>
 
-      {canEdit && canSeeHp && (
+      {canEdit && (
         <View style={styles.pActions}>
-          <MiniBtn icon="remove" onPress={() => setHpChange("damage")} />
-          <MiniBtn icon="add" onPress={() => setHpChange("heal")} />
-          <MiniBtn icon="close" onPress={() => remove.mutate(participant._id)} danger />
+          <MiniBtn icon="medical" onPress={() => setConditionsOpen(true)} />
+          {canSeeHp && (
+            <>
+              <MiniBtn icon="remove" onPress={() => setHpChange("damage")} />
+              <MiniBtn icon="add" onPress={() => setHpChange("heal")} />
+            </>
+          )}
+          {(isAdmin || isOwner) && <MiniBtn icon="close" onPress={() => remove.mutate(participant._id)} danger />}
         </View>
       )}
 
@@ -235,7 +243,86 @@ function ParticipantRow({
           setHpChange(null);
         }}
       />
+      <ConditionsModal
+        visible={conditionsOpen}
+        name={participant.name}
+        selected={participant.conditions || []}
+        onClose={() => setConditionsOpen(false)}
+        onChange={(conditions) => patch.mutate({ pid: participant._id, conditions })}
+      />
     </MotiView>
+  );
+}
+
+function ConditionChips({ conditions }: { conditions: string[] }) {
+  if (!conditions.length) return null;
+  return (
+    <View style={styles.conditionRow}>
+      {conditions.map((condition) => (
+        <View key={condition} style={styles.conditionChip}>
+          <Text style={styles.conditionChipText}>{conditionLabel(condition)}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function ConditionsModal({
+  visible,
+  name,
+  selected,
+  onClose,
+  onChange,
+}: {
+  visible: boolean;
+  name: string;
+  selected: string[];
+  onClose: () => void;
+  onChange: (conditions: string[]) => void;
+}) {
+  const toggle = (id: string) => {
+    const next = selected.includes(id) ? selected.filter((condition) => condition !== id) : [...selected, id];
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onChange(next);
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.sheetBackdrop}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} />
+        <View style={styles.sheet}>
+          <LinearGradient colors={[colors.surfaceAlt, colors.surface]} style={StyleSheet.absoluteFill} />
+          <View style={styles.sheetHandle} />
+          <Text variant="title">Estados</Text>
+          <Text variant="caption" style={{ marginTop: 4, marginBottom: 12 }}>{name}</Text>
+          <FlatList
+            data={CONDITION_OPTIONS}
+            keyExtractor={(condition) => condition.id}
+            numColumns={2}
+            scrollEnabled
+            style={{ maxHeight: 430 }}
+            columnWrapperStyle={{ gap: 8 }}
+            contentContainerStyle={{ gap: 8 }}
+            renderItem={({ item: condition }) => {
+              const active = selected.includes(condition.id);
+              return (
+                <Pressable
+                  onPress={() => toggle(condition.id)}
+                  style={[styles.conditionOption, active && styles.conditionOptionActive]}
+                >
+                  <View style={styles.conditionOptionTitle}>
+                    <Ionicons name={active ? "checkbox" : "square-outline"} size={18} color={active ? colors.accent : colors.muted} />
+                    <Text style={styles.conditionOptionLabel}>{condition.label}</Text>
+                  </View>
+                  <Text variant="caption" color={colors.textDim}>{condition.short}</Text>
+                </Pressable>
+              );
+            }}
+          />
+          <Button label="Listo" icon="checkmark" onPress={onClose} style={{ marginTop: 14 }} />
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -456,6 +543,29 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   tempMiniText: { color: "#8FC5FF", fontFamily: font.bodyBold, fontSize: 11 },
+  conditionRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 7 },
+  conditionChip: {
+    backgroundColor: colors.warning + "22",
+    borderColor: colors.warning + "88",
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  conditionChipText: { color: colors.warning, fontFamily: font.bodyBold, fontSize: 11 },
+  conditionOption: {
+    flex: 1,
+    minHeight: 78,
+    backgroundColor: colors.bg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 10,
+    gap: 5,
+  },
+  conditionOptionActive: { borderColor: colors.accent, backgroundColor: colors.primary + "66" },
+  conditionOptionTitle: { flexDirection: "row", alignItems: "center", gap: 6 },
+  conditionOptionLabel: { flex: 1, color: colors.text, fontFamily: font.bodyBold, fontSize: 13 },
   modalBackdrop: { flex: 1, backgroundColor: colors.overlay, alignItems: "center", justifyContent: "center", padding: 24 },
   amountInput: {
     marginVertical: 16,

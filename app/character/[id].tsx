@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ActivityIndicator, Modal, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { router, useLocalSearchParams, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { MotiView, AnimatePresence } from "moti";
@@ -29,13 +29,14 @@ import {
   Race,
   Spell,
 } from "@/api/hooks";
-import { ABILITY_ORDER, ABILITY_FULL, ABILITY_DESCRIPTIONS, abilityMod, classHighlightsAbility, formatMod, spellLevelLabel } from "@/lib/format";
+import { ABILITY_ORDER, ABILITY_FULL, ABILITY_DESCRIPTIONS, CONCENTRATION_INFO, abilityMod, classHighlightsAbility, formatMod, spellLevelLabel } from "@/lib/format";
 import {
   featuresUpTo, resourcesCount, computeAc, spellSaveDC, spellAttackBonus, initiative, maxUnlockedSpellLevel, saveModifier,
 } from "@/lib/sheet";
 import { ClassIcon } from "@/components/ClassIcon";
 import { RaceImage } from "@/components/RaceImage";
 import { rollNotation } from "@/lib/dice";
+import { CONDITION_OPTIONS, conditionLabel } from "@/lib/conditions";
 import { Section } from "@/components/sheet/Section";
 import { NumberEditorModal, ArmorModal } from "@/components/sheet/editors";
 import {
@@ -310,7 +311,7 @@ export default function CharacterSheet() {
               {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((lvl) => {
                 const spells = visibleSpells.filter((s) => s.level === lvl);
                 if (!spells.length) return null;
-                return <View key={lvl}><Text variant="label" style={{ marginTop: 14, marginBottom: 8 }}>{spellLevelLabel(lvl).toUpperCase()}</Text>{spells.map((s, i) => <SpellRow key={s._id} spell={s} delay={i * 25} character={character} update={updateChar.mutate} />)}</View>;
+                return <View key={lvl}><Text variant="label" style={{ marginTop: 14, marginBottom: 8 }}>{spellLevelLabel(lvl).toUpperCase()}</Text>{spells.map((s, i) => <SpellRow key={s._id} spell={s} delay={i * 25} character={character} update={updateChar.mutate} onConcentrationInfo={() => setInfoModal(CONCENTRATION_INFO)} />)}</View>;
               })}
             </>
           )}
@@ -535,6 +536,7 @@ function HeroTrackerRow({
   const user = useAuth((s) => s.user);
   const patch = useTrackerPatch();
   const [initEditOpen, setInitEditOpen] = useState(false);
+  const [conditionsOpen, setConditionsOpen] = useState(false);
   const isMonster = participant.type === "monster";
   const accent = participant.color || (isMonster ? colors.secondary : colors.accent);
   const canSeeHp = participant.hp !== undefined && participant.maxHp !== undefined;
@@ -594,7 +596,14 @@ function HeroTrackerRow({
         ) : (
           null
         )}
+        <TrackerConditionChips conditions={participant.conditions || []} />
       </View>
+
+      {canEdit && (
+        <Pressable onPress={() => setConditionsOpen(true)} hitSlop={8} style={styles.trackerConditionButton}>
+          <Ionicons name="medical" size={15} color={colors.text} />
+        </Pressable>
+      )}
 
       <NumberEditorModal
         visible={initEditOpen}
@@ -609,7 +618,79 @@ function HeroTrackerRow({
           patch.mutate({ pid: participant._id, initiative: v });
         }}
       />
+      <TrackerConditionsModal
+        visible={conditionsOpen}
+        name={participant.name}
+        selected={participant.conditions || []}
+        onClose={() => setConditionsOpen(false)}
+        onChange={(conditions) => patch.mutate({ pid: participant._id, conditions })}
+      />
     </MotiView>
+  );
+}
+
+function TrackerConditionChips({ conditions }: { conditions: string[] }) {
+  if (!conditions.length) return null;
+  return (
+    <View style={styles.trackerConditionRow}>
+      {conditions.map((condition) => (
+        <View key={condition} style={styles.trackerConditionChip}>
+          <Text style={styles.trackerConditionChipText}>{conditionLabel(condition)}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function TrackerConditionsModal({
+  visible,
+  name,
+  selected,
+  onClose,
+  onChange,
+}: {
+  visible: boolean;
+  name: string;
+  selected: string[];
+  onClose: () => void;
+  onChange: (conditions: string[]) => void;
+}) {
+  const toggle = (id: string) => {
+    const next = selected.includes(id) ? selected.filter((condition) => condition !== id) : [...selected, id];
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onChange(next);
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <Card style={{ width: "100%", maxWidth: 360, maxHeight: "82%" }}>
+          <Text variant="title">Estados</Text>
+          <Text variant="caption" style={{ marginTop: 4, marginBottom: 12 }}>{name}</Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <View style={styles.trackerConditionGrid}>
+              {CONDITION_OPTIONS.map((condition) => {
+                const active = selected.includes(condition.id);
+                return (
+                  <Pressable
+                    key={condition.id}
+                    onPress={() => toggle(condition.id)}
+                    style={[styles.trackerConditionOption, active && styles.trackerConditionOptionActive]}
+                  >
+                    <View style={styles.trackerConditionOptionTitle}>
+                      <Ionicons name={active ? "checkbox" : "square-outline"} size={18} color={active ? colors.accent : colors.muted} />
+                      <Text style={styles.trackerConditionOptionLabel}>{condition.label}</Text>
+                    </View>
+                    <Text variant="caption" color={colors.textDim}>{condition.short}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </ScrollView>
+          <Button label="Listo" icon="checkmark" onPress={onClose} style={{ marginTop: 14 }} />
+        </Card>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -643,11 +724,13 @@ function SpellRow({
   delay,
   character,
   update,
+  onConcentrationInfo,
 }: {
   spell: Spell;
   delay: number;
   character: Character;
   update: (patch: Partial<Character>) => void;
+  onConcentrationInfo: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const text = spell.simpleDescription || spell.description?.[0] || "Sin descripción todavía.";
@@ -669,7 +752,18 @@ function SpellRow({
             {spellLevelLabel(spell.level)} · {spell.school}
           </Text>
         </View>
-        {spell.concentration && <Ionicons name="eye" size={14} color={colors.muted} />}
+        {spell.concentration && (
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation();
+              onConcentrationInfo();
+            }}
+            hitSlop={8}
+            style={styles.spellInfoIcon}
+          >
+            <Ionicons name="eye" size={14} color={colors.muted} />
+          </Pressable>
+        )}
         <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={16} color={colors.textFaint} />
       </View>
 
@@ -933,6 +1027,40 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   trackerTempMiniText: { color: "#8FC5FF", fontFamily: font.bodyBold, fontSize: 11 },
+  trackerConditionButton: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  trackerConditionRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 7 },
+  trackerConditionChip: {
+    backgroundColor: colors.warning + "22",
+    borderColor: colors.warning + "88",
+    borderWidth: 1,
+    borderRadius: radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  trackerConditionChipText: { color: colors.warning, fontFamily: font.bodyBold, fontSize: 11 },
+  trackerConditionGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  trackerConditionOption: {
+    width: "48%",
+    minHeight: 78,
+    backgroundColor: colors.bg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 10,
+    gap: 5,
+  },
+  trackerConditionOptionActive: { borderColor: colors.accent, backgroundColor: colors.primary + "66" },
+  trackerConditionOptionTitle: { flexDirection: "row", alignItems: "center", gap: 6 },
+  trackerConditionOptionLabel: { flex: 1, color: colors.text, fontFamily: font.bodyBold, fontSize: 13 },
   quickRow: { flexDirection: "row", gap: 10, marginTop: 14 },
   quickStat: {
     backgroundColor: colors.surface,
@@ -976,6 +1104,12 @@ const styles = StyleSheet.create({
     height: 26,
     borderRadius: radius.sm,
     backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  spellInfoIcon: {
+    width: 28,
+    height: 28,
     alignItems: "center",
     justifyContent: "center",
   },

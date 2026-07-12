@@ -18,6 +18,7 @@ export interface Race {
   size: string;
   speed: number;
   abilityBonuses: { ability: string; bonus: number }[];
+  flexibleAbilityBonuses?: boolean;
   traits: RaceTrait[];
   languages: string;
 }
@@ -100,6 +101,20 @@ export interface ResourceState {
   used: number;
 }
 
+export type WeaponCategory = "simple-melee" | "simple-ranged" | "martial-melee" | "martial-ranged";
+
+export interface Weapon {
+  _id?: string;
+  index: string;
+  name: string;
+  category: WeaponCategory;
+  damageDice: string;
+  damageType: string;
+  properties: string[];
+  description: string;
+  custom?: boolean;
+}
+
 export interface UserSummary {
   id?: string;
   _id?: string;
@@ -164,6 +179,7 @@ export interface Participant {
   tempHp?: number;
   maxHp?: number;
   ac: number;
+  conditions?: string[];
   characterId?: string;
   ownerUserId?: string;
   color?: string;
@@ -202,6 +218,9 @@ export const useMonsters = (search: string) =>
     queryKey: ["monsters", search],
     queryFn: () => api<Monster[]>(`/monsters?search=${encodeURIComponent(search)}`),
   });
+
+export const useWeapons = () =>
+  useQuery({ queryKey: ["weapons"], queryFn: () => api<Weapon[]>("/weapons") });
 
 /* ---------- Personajes ---------- */
 export const useCharacters = () =>
@@ -250,6 +269,34 @@ export const useCreateUser = () => {
     mutationFn: (body: { username: string; password: string; displayName?: string }) =>
       api<UserSummary>("/auth/users", { method: "POST", body }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["characters"] }),
+  });
+};
+
+export const useCreateWeapon = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      name: string;
+      category: WeaponCategory;
+      damageDice?: string;
+      damageType?: string;
+      properties?: string[];
+      description?: string;
+    }) => api<Weapon>("/weapons", { method: "POST", body }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["weapons"] }),
+  });
+};
+
+export const useAssignWeapon = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ characterId, weaponIndex }: { characterId: string; weaponIndex: string }) =>
+      api<Character>(`/weapons/assign/${characterId}`, { method: "POST", body: { weaponIndex } }),
+    onSuccess: (character) => {
+      qc.invalidateQueries({ queryKey: ["weapons"] });
+      qc.invalidateQueries({ queryKey: ["characters"] });
+      qc.invalidateQueries({ queryKey: ["character", character._id] });
+    },
   });
 };
 
@@ -330,7 +377,7 @@ export const useTrackerAddMonster = trackerMutation<{
   ac?: number;
   initiative?: number;
 }>((v) => api("/tracker/participants", { method: "POST", body: v }));
-export const useTrackerPatch = trackerMutation<{ pid: string; hp?: number; tempHp?: number; initiative?: number }>(({ pid, ...body }) =>
+export const useTrackerPatch = trackerMutation<{ pid: string; hp?: number; tempHp?: number; initiative?: number; conditions?: string[] }>(({ pid, ...body }) =>
   api(`/tracker/participants/${pid}`, { method: "PATCH", body })
 );
 export const useTrackerSettings = trackerMutation<{ levelUpEnabled?: boolean }>((body) =>
