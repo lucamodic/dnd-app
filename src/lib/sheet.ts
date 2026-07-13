@@ -119,9 +119,9 @@ export function cantripLimit(cls: Clazz, level: number): number {
 /**
  * Cuántos hechizos (sin contar trucos) puede tener conocidos/preparados a este nivel.
  * Clases "de conocidos" (bardo, explorador, hechicero, brujo) usan el número fijo del SRD.
- * Clases "de preparados" (clérigo, druida, mago, paladín) no tienen ese número en el SRD
- * (preparan de toda su lista); usamos la fórmula oficial: mod. de característica + nivel
- * (mitad redondeada hacia abajo para el paladín, que es semi-lanzador).
+ * Clases "de preparados" (clérigo, druida, mago, paladín, artificiero) no tienen ese número en
+ * el SRD (preparan de toda su lista); usamos la fórmula oficial: mod. de característica + nivel
+ * (mitad redondeada hacia abajo para paladín y artificiero, que son semi-lanzadores).
  */
 export function spellsKnownLimit(cls: Clazz, character: Character, level: number): number {
   const known = progressionAt(cls, level)?.spellsKnown || 0;
@@ -129,7 +129,7 @@ export function spellsKnownLimit(cls: Clazz, character: Character, level: number
   if (!cls.spellcastingAbility) return 0;
   const abilityKey = cls.spellcastingAbility as keyof AbilityScores;
   const mod = abilityMod(character.abilityScores[abilityKey]);
-  const effectiveLevel = cls.index === "paladin" ? Math.floor(level / 2) : level;
+  const effectiveLevel = ["paladin", "artificer"].includes(cls.index) ? Math.floor(level / 2) : level;
   return Math.max(1, mod + effectiveLevel);
 }
 

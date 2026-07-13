@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Dimensions, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
-import { MotiView, AnimatePresence } from "moti";
+import { Dimensions, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { MotiView } from "moti";
 import { Ionicons } from "@expo/vector-icons";
 import { Character, Clazz, Race, ClassResource, useCreateWeapon, useWeapons, WeaponCategory } from "@/api/hooks";
 import {
@@ -29,6 +29,13 @@ const COINS: { key: keyof Character["currency"]; label: string; color: string }[
   { key: "gp", label: "Oro", color: "#E8C25A" },
   { key: "sp", label: "Plata", color: "#C7CCD6" },
   { key: "cp", label: "Cobre", color: "#C08457" },
+];
+
+const WEAPON_CATEGORY_OPTIONS: { value: WeaponCategory; label: string }[] = [
+  { value: "simple-melee", label: "Simple cuerpo a cuerpo" },
+  { value: "simple-ranged", label: "Simple a distancia" },
+  { value: "martial-melee", label: "Marcial cuerpo a cuerpo" },
+  { value: "martial-ranged", label: "Marcial a distancia" },
 ];
 
 /* ---------- Armas (varias, cada una reemplazable/eliminable por separado) ---------- */
@@ -157,6 +164,11 @@ function CreateWeaponModal({
     onClose();
   };
 
+  const chooseCategory = (nextCategory: WeaponCategory) => {
+    Keyboard.dismiss();
+    setCategory(nextCategory);
+  };
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.sheetBackdrop}>
@@ -167,27 +179,35 @@ function CreateWeaponModal({
           <Text variant="caption" style={{ marginTop: 4, marginBottom: 12 }}>
             Se agrega a Mongo y queda equipada en este personaje.
           </Text>
-          <TextInput placeholder="Nombre" placeholderTextColor={colors.textFaint} value={name} onChangeText={setName} style={styles.itemInput} />
-          <View style={styles.weaponCategoryGrid}>
-            {(["simple-melee", "simple-ranged", "martial-melee", "martial-ranged"] as WeaponCategory[]).map((cat) => (
-              <Pressable key={cat} onPress={() => setCategory(cat)} style={[styles.weaponCategoryBtn, category === cat && styles.weaponCategoryBtnActive]}>
-                <Text style={styles.weaponCategoryText}>{cat.includes("ranged") ? "Dist." : "C/C"} {cat.includes("martial") ? "marcial" : "simple"}</Text>
-              </Pressable>
-            ))}
-          </View>
-          <View style={{ flexDirection: "row", gap: 10 }}>
-            <TextInput placeholder="Daño (1d6)" placeholderTextColor={colors.textFaint} value={damageDice} onChangeText={setDamageDice} style={[styles.itemInput, { flex: 1 }]} />
-            <TextInput placeholder="Tipo" placeholderTextColor={colors.textFaint} value={damageType} onChangeText={setDamageType} style={[styles.itemInput, { flex: 1 }]} />
-          </View>
-          <TextInput placeholder="Propiedades separadas por coma" placeholderTextColor={colors.textFaint} value={properties} onChangeText={setProperties} style={styles.itemInput} />
-          <TextInput
-            placeholder="Descripción"
-            placeholderTextColor={colors.textFaint}
-            value={description}
-            onChangeText={setDescription}
-            multiline
-            style={[styles.itemInput, styles.itemDescriptionInput]}
-          />
+          <ScrollView keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false} contentContainerStyle={styles.itemSheetContent}>
+            <TextInput placeholder="Nombre" placeholderTextColor={colors.textFaint} value={name} onChangeText={setName} style={styles.itemInput} />
+            <View style={styles.weaponCategoryGrid}>
+              {WEAPON_CATEGORY_OPTIONS.map((option) => (
+                <Pressable
+                  key={option.value}
+                  onPressIn={() => chooseCategory(option.value)}
+                  hitSlop={6}
+                  pressRetentionOffset={12}
+                  style={[styles.weaponCategoryBtn, category === option.value && styles.weaponCategoryBtnActive]}
+                >
+                  <Text style={styles.weaponCategoryText}>{option.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <TextInput placeholder="Daño (1d6)" placeholderTextColor={colors.textFaint} value={damageDice} onChangeText={setDamageDice} style={[styles.itemInput, { flex: 1 }]} />
+              <TextInput placeholder="Tipo" placeholderTextColor={colors.textFaint} value={damageType} onChangeText={setDamageType} style={[styles.itemInput, { flex: 1 }]} />
+            </View>
+            <TextInput placeholder="Propiedades separadas por coma" placeholderTextColor={colors.textFaint} value={properties} onChangeText={setProperties} style={styles.itemInput} />
+            <TextInput
+              placeholder="Descripción"
+              placeholderTextColor={colors.textFaint}
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              style={[styles.itemInput, styles.itemDescriptionInput]}
+            />
+          </ScrollView>
           <Button label="Crear y dar" icon="checkmark" onPress={save} loading={createWeapon.isPending} disabled={!name.trim()} style={{ marginTop: 12 }} />
         </View>
       </KeyboardAvoidingView>
@@ -321,13 +341,11 @@ function ItemRow({ item, onEdit, onRemove }: { item: Character["inventoryItems"]
           <Text variant="body" style={{ flex: 1, fontSize: 14 }}>{item.text}</Text>
           {hasDescription && <Ionicons name={open ? "chevron-up" : "chevron-down"} size={14} color={colors.textFaint} />}
         </View>
-        <AnimatePresence>
-          {open && (
-            <MotiView from={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" as any }} exit={{ opacity: 0, height: 0 }}>
-              <Text variant="caption" style={{ marginTop: 6 }}>{item.description}</Text>
-            </MotiView>
-          )}
-        </AnimatePresence>
+        {open && (
+          <MotiView from={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ type: "timing", duration: 140 }}>
+            <Text variant="caption" style={{ marginTop: 6 }}>{item.description}</Text>
+          </MotiView>
+        )}
       </Pressable>
       <Pressable onPress={onEdit} hitSlop={8}>
         <Ionicons name="create-outline" size={16} color={colors.textFaint} />
@@ -365,24 +383,30 @@ function ItemModal({
         <View style={styles.itemSheet}>
           <View style={styles.handle} />
           <Text variant="title">{item ? "Editar ítem" : "Agregar ítem"}</Text>
-          <TextInput
-            value={text}
-            onChangeText={setText}
-            placeholder="Nombre del ítem"
-            placeholderTextColor={colors.textFaint}
-            style={styles.itemInput}
-            returnKeyType="next"
-          />
-          <TextInput
-            value={description}
-            onChangeText={setDescription}
-            placeholder="Descripción opcional"
-            placeholderTextColor={colors.textFaint}
-            style={[styles.itemInput, styles.itemDescriptionInput]}
-            multiline
-            textAlignVertical="top"
-          />
-          <Button label="Guardar" icon="checkmark" onPress={() => onSave(text.trim(), description.trim())} disabled={!text.trim()} />
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={styles.itemSheetContent}>
+            <TextInput
+              value={text}
+              onChangeText={setText}
+              placeholder="Nombre del ítem"
+              placeholderTextColor={colors.textFaint}
+              cursorColor={colors.accent}
+              selectionColor={colors.accent}
+              style={[styles.itemInput, styles.itemNameInput]}
+              returnKeyType="next"
+            />
+            <TextInput
+              value={description}
+              onChangeText={setDescription}
+              placeholder="Descripción opcional"
+              placeholderTextColor={colors.textFaint}
+              cursorColor={colors.accent}
+              selectionColor={colors.accent}
+              style={[styles.itemInput, styles.itemDescriptionInput]}
+              multiline
+              textAlignVertical="top"
+            />
+          </ScrollView>
+          <Button label={item ? "Guardar cambios" : "Crear ítem"} icon="checkmark" onPress={() => onSave(text.trim(), description.trim())} disabled={!text.trim()} />
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -390,12 +414,14 @@ function ItemModal({
 }
 
 export function NotesSection({ character, update }: { character: Character; update: UpdateFn }) {
-  const initial = character.noteSections || { general: character.notes || "", campaign: "", npcs: "", places: "", other: "" };
+  const emptyNotes = { characterInfo: "", general: character.notes || "", campaign: "", npcs: "", places: "", other: "" };
+  const initial = { ...emptyNotes, ...(character.noteSections || {}) };
   const [notes, setNotes] = useState(initial);
   const [page, setPage] = useState(0);
   const [editingNote, setEditingNote] = useState(false);
   const width = Dimensions.get("window").width - 40;
   const tabs = [
+    ["characterInfo", "Información del personaje"],
     ["general", "Generales"],
     ["campaign", "Campaña"],
     ["npcs", "NPCs"],
@@ -404,7 +430,7 @@ export function NotesSection({ character, update }: { character: Character; upda
   ] as const;
 
   useEffect(() => {
-    setNotes(character.noteSections || { general: character.notes || "", campaign: "", npcs: "", places: "", other: "" });
+    setNotes({ ...emptyNotes, ...(character.noteSections || {}) });
   }, [character.noteSections, character.notes]);
 
   const save = (key: keyof typeof notes, value: string) => {
@@ -587,15 +613,13 @@ function FeatureRow({ item }: { item: { name: string; description: string; level
         </Text>
         {hasDesc && <Ionicons name={open ? "chevron-up" : "chevron-down"} size={15} color={colors.textFaint} />}
       </View>
-      <AnimatePresence>
-        {open && (
-          <MotiView from={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <Text variant="body" style={{ fontSize: 13, marginTop: 6 }}>
-              {item.description}
-            </Text>
-          </MotiView>
-        )}
-      </AnimatePresence>
+      {open && (
+        <MotiView from={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ type: "timing", duration: 140 }}>
+          <Text variant="body" style={{ fontSize: 13, marginTop: 6 }}>
+            {item.description}
+          </Text>
+        </MotiView>
+      )}
     </Pressable>
   );
 }
@@ -777,7 +801,6 @@ const styles = StyleSheet.create({
   },
   itemAddRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   itemInput: {
-    flex: 1,
     backgroundColor: colors.bg,
     borderRadius: radius.md,
     borderWidth: 1,
@@ -786,6 +809,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontFamily: font.body,
+    fontSize: 14,
   },
   itemRow: {
     flexDirection: "row",
@@ -807,7 +831,10 @@ const styles = StyleSheet.create({
     gap: 12,
     borderTopWidth: 1,
     borderColor: colors.border,
+    maxHeight: "88%",
   },
+  itemSheetContent: { gap: 12, paddingBottom: 2 },
+  itemNameInput: { minHeight: 48 },
   weaponCategoryGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   weaponCategoryBtn: {
     width: "48%",
@@ -819,10 +846,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   weaponCategoryBtnActive: { borderColor: colors.accent, backgroundColor: colors.primary + "66" },
-  weaponCategoryText: { color: colors.text, fontFamily: font.bodyBold, fontSize: 12 },
+  weaponCategoryText: { color: colors.text, fontFamily: font.bodyBold, fontSize: 11, textAlign: "center" },
   handle: { alignSelf: "center", width: 42, height: 5, borderRadius: 3, backgroundColor: colors.muted, marginBottom: 4 },
   sheetBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
-  itemDescriptionInput: { minHeight: 110, paddingTop: 12 },
+  itemDescriptionInput: { minHeight: 130, paddingTop: 12 },
   noteDots: { flexDirection: "row", justifyContent: "center", gap: 6 },
   notePage: { paddingHorizontal: 6 },
   keyboardSpacer: { height: Platform.OS === "ios" ? 260 : 320 },

@@ -15,6 +15,7 @@ interface Props {
   disabled?: boolean;
   style?: ViewStyle;
   small?: boolean;
+  tintColor?: string;
 }
 
 export function Button({
@@ -26,6 +27,7 @@ export function Button({
   disabled,
   style,
   small,
+  tintColor,
 }: Props) {
   const handlePress = () => {
     if (disabled || loading) return;
@@ -35,7 +37,9 @@ export function Button({
 
   const isGhost = variant === "ghost";
   const gradient =
-    variant === "primary" ? ([colors.secondary, colors.primary] as const) : ([colors.surfaceAlt, colors.surface] as const);
+    variant === "primary"
+      ? ([tintColor || colors.secondary, colors.primary] as const)
+      : ([tintColor ? `${tintColor}44` : colors.surfaceAlt, colors.surface] as const);
 
   return (
     <Pressable onPress={handlePress} disabled={disabled || loading} style={style}>
@@ -54,6 +58,7 @@ export function Button({
               small && styles.small,
               isGhost && styles.ghost,
               variant === "secondary" && styles.bordered,
+              tintColor && variant === "secondary" && { borderColor: `${tintColor}99` },
             ]}
           >
             {loading ? (

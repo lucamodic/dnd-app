@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { router, useLocalSearchParams, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { MotiView, AnimatePresence } from "moti";
+import { MotiView } from "moti";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
@@ -11,7 +11,7 @@ import { Text } from "@/components/Text";
 import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { HpBar } from "@/components/HpBar";
-import { RollButton } from "@/components/RollButton";
+import { useDice } from "@/components/dice/DiceProvider";
 import {
   useCharacter,
   useLevelUp,
@@ -34,10 +34,11 @@ import {
 import { ABILITY_ORDER, ABILITY_FULL, ABILITY_DESCRIPTIONS, CONCENTRATION_INFO, abilityMod, classHighlightsAbility, formatMod, spellLevelLabel } from "@/lib/format";
 import {
   featuresUpTo, resourcesCount, computeAc, spellSaveDC, spellAttackBonus, initiative, maxUnlockedSpellLevel, saveModifier,
+  spellSlotsAt, setSpellSlotUsed,
 } from "@/lib/sheet";
 import { ClassIcon } from "@/components/ClassIcon";
 import { RaceImage } from "@/components/RaceImage";
-import { rollNotation } from "@/lib/dice";
+import { parseDice, rollNotation } from "@/lib/dice";
 import { CONDITION_OPTIONS, conditionLabel } from "@/lib/conditions";
 import { Section } from "@/components/sheet/Section";
 import { NumberEditorModal, ArmorModal, SubclassModal, RestModal } from "@/components/sheet/editors";
@@ -227,10 +228,10 @@ export default function CharacterSheet() {
         </View>
         <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
           <View style={{ flex: 1 }}>
-            <Button label="Descanso corto" icon="cafe" variant="secondary" small onPress={() => setRestMode("short")} />
+            <Button label="Descanso corto" icon="cafe" variant="secondary" small onPress={() => setRestMode("short")} tintColor={accent} />
           </View>
           <View style={{ flex: 1 }}>
-            <Button label="Descanso largo" icon="moon" variant="secondary" small onPress={() => setRestMode("full")} />
+            <Button label="Descanso largo" icon="moon" variant="secondary" small onPress={() => setRestMode("full")} tintColor={accent} />
           </View>
         </View>
       </Card>
@@ -243,6 +244,7 @@ export default function CharacterSheet() {
             icon="trending-up"
             onPress={() => setLevelUpOpen(true)}
             disabled={!canLevelUp}
+            tintColor={accent}
           />
         </View>
         <View style={{ flex: 1 }}>
@@ -253,6 +255,7 @@ export default function CharacterSheet() {
             onPress={onJoin}
             loading={join.isPending}
             disabled={inCombat}
+            tintColor={accent}
           />
         </View>
       </View>
@@ -338,7 +341,7 @@ export default function CharacterSheet() {
               {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((lvl) => {
                 const spells = visibleSpells.filter((s) => s.level === lvl);
                 if (!spells.length) return null;
-                return <View key={lvl}><Text variant="label" style={{ marginTop: 14, marginBottom: 8 }}>{spellLevelLabel(lvl).toUpperCase()}</Text>{spells.map((s, i) => <SpellRow key={s._id} spell={s} delay={i * 25} character={character} update={updateChar.mutate} onConcentrationInfo={() => setInfoModal(CONCENTRATION_INFO)} />)}</View>;
+                return <View key={lvl}><Text variant="label" style={{ marginTop: 14, marginBottom: 8 }}>{spellLevelLabel(lvl).toUpperCase()}</Text>{spells.map((s, i) => <SpellRow key={s._id} spell={s} delay={i * 25} character={character} cls={cls} update={updateChar.mutate} onConcentrationInfo={() => setInfoModal(CONCENTRATION_INFO)} />)}</View>;
               })}
               {subclassBonusSpells.length > 0 && (
                 <View>
@@ -352,6 +355,7 @@ export default function CharacterSheet() {
                       spell={s}
                       delay={i * 25}
                       character={character}
+                      cls={cls}
                       update={updateChar.mutate}
                       onConcentrationInfo={() => setInfoModal(CONCENTRATION_INFO)}
                     />
@@ -794,24 +798,108 @@ function InfoChip({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label
   );
 }
 
+function formatDiceNotation(terms: { count: number; sides: number }[], modifier: number) {
+  const parts = terms
+    .filter((term) => term.count !== 0)
+    .map((term) => `${term.count < 0 ? "-" : ""}${Math.abs(term.count)}d${term.sides}`);
+  if (modifier) parts.push(`${modifier > 0 ? "+" : "-"}${Math.abs(modifier)}`);
+  return parts.join("+").replace(/\+-/g, "-");
+}
+
+function multiplyDiceNotation(notation: string, times: number) {
+  const parsed = parseDice(notation);
+  if (!parsed || times <= 0) return "";
+  return formatDiceNotation(
+    parsed.terms.map((term) => ({ ...term, count: term.count * times })),
+    parsed.modifier * times
+  );
+}
+
+function upcastStepCount(higherLevelText: string, levelsAbove: number) {
+  if (/cada dos niveles/i.test(higherLevelText)) return Math.floor(levelsAbove / 2);
+  return levelsAbove;
+}
+
+function extraDiceForUpcast(spell: Spell, slotLevel: number) {
+  const levelsAbove = slotLevel - spell.level;
+  if (levelsAbove <= 0) return "";
+  const higherLevelText = (spell.higherLevel || []).join(" ");
+  const steps = upcastStepCount(higherLevelText, levelsAbove);
+  if (steps <= 0) return "";
+
+  if (spell.index === "magic-missile" || /dardo adicional/i.test(higherLevelText)) {
+    return multiplyDiceNotation("1d4+1", steps);
+  }
+  if (/rayo adicional/i.test(higherLevelText) && spell.dice) {
+    return multiplyDiceNotation(spell.dice, steps);
+  }
+
+  const diceMatch = higherLevelText.match(/(?:aumenta|aumentan|sube|suben|incrementa|incrementan)\s+(\d+d\d+(?:\s*[+-]\s*\d+)?)/i);
+  if (!diceMatch) return "";
+  return multiplyDiceNotation(diceMatch[1], steps);
+}
+
+function castNotationFor(spell: Spell, slotLevel: number) {
+  const base = spell.dice || "";
+  const extra = extraDiceForUpcast(spell, slotLevel);
+  if (base && extra) return `${base}+${extra}`;
+  return base || extra;
+}
+
+function hasUpcastDamage(spell: Spell) {
+  const higherLevelText = (spell.higherLevel || []).join(" ");
+  return !!(
+    higherLevelText.match(/(?:aumenta|aumentan|sube|suben|incrementa|incrementan)\s+\d+d\d+/i) ||
+    /dardo adicional|rayo adicional/i.test(higherLevelText)
+  );
+}
+
 function SpellRow({
   spell,
   delay,
   character,
+  cls,
   update,
   onConcentrationInfo,
 }: {
   spell: Spell;
   delay: number;
   character: Character;
+  cls: Clazz;
   update: (patch: Partial<Character>) => void;
   onConcentrationInfo: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [castOpen, setCastOpen] = useState(false);
+  const { roll } = useDice();
   const text = spell.simpleDescription || spell.description?.[0] || "Sin descripción todavía.";
+  const higherLevel = (spell.higherLevel || []).filter(Boolean);
+  const slots = spellSlotsAt(cls, character);
+  const availableSlots = spell.level > 0 ? slots.filter((slot) => slot.spellLevel >= spell.level && slot.used < slot.max) : [];
+  const lowestAvailableSlot = availableSlots[0]?.spellLevel;
+  const hasHigherAvailableSlot = availableSlots.some((slot) => slot.spellLevel > spell.level);
+  const canImproveWithHigherSlot = spell.level > 0 && hasUpcastDamage(spell) && hasHigherAvailableSlot;
+  const canCastWithSlot = spell.level === 0 || availableSlots.length > 0;
+  const directCastNotation = spell.level > 0 && lowestAvailableSlot ? castNotationFor(spell, lowestAvailableSlot) : spell.dice;
   const mageArmorActive = character.armor === "mage-armor";
+  const castCantrip = () => {
+    if (!spell.dice) return;
+    roll(spell.dice, `${spell.name} · Truco`);
+  };
+  const castWithSlot = (slotLevel: number) => {
+    const notation = castNotationFor(spell, slotLevel);
+    update({ spellSlotsUsed: setSpellSlotUsed(character, slotLevel - 1, (character.spellSlotsUsed?.[slotLevel - 1] || 0) + 1) });
+    setCastOpen(false);
+    if (notation) roll(notation, `${spell.name} · Nivel ${slotLevel}`);
+  };
+  const openCast = () => {
+    if (spell.level === 0) return castCantrip();
+    if (!canImproveWithHigherSlot && lowestAvailableSlot) return castWithSlot(lowestAvailableSlot);
+    setCastOpen(true);
+  };
 
   return (
+    <>
     <Card delay={delay} style={{ marginBottom: 10 }} onPress={() => setExpanded((e) => !e)}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <View style={styles.spellLevel}>
@@ -842,14 +930,8 @@ function SpellRow({
         <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={16} color={colors.textFaint} />
       </View>
 
-      <AnimatePresence>
-        {expanded && (
-          <MotiView
-            from={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" as any }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ type: "timing", duration: 220 }}
-          >
+      {expanded && (
+          <MotiView from={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ type: "timing", duration: 140 }}>
             <Text variant="body" style={{ marginTop: 10, fontSize: 14 }}>
               {text}
             </Text>
@@ -861,9 +943,37 @@ function SpellRow({
               </View>
             )}
 
-            {!!spell.dice && (
+            {(!!spell.dice || spell.level > 0) && (
               <View style={{ marginTop: 12 }}>
-                <RollButton notation={spell.dice} label={`${spell.name} · ${spell.dice}`} />
+                <Button
+                  label={canImproveWithHigherSlot ? "Lanzar hechizo" : directCastNotation ? `Lanzar ${directCastNotation}` : "Lanzar hechizo"}
+                  icon="dice"
+                  small
+                  disabled={!canCastWithSlot}
+                  variant={canCastWithSlot ? "primary" : "secondary"}
+                  onPress={openCast}
+                />
+                {!canCastWithSlot && (
+                  <Text variant="caption" color={colors.textDim} style={{ marginTop: 6 }}>
+                    No te quedan espacios disponibles para lanzarlo.
+                  </Text>
+                )}
+              </View>
+            )}
+
+            {higherLevel.length > 0 && (
+              <View style={styles.higherLevelBox}>
+                <View style={styles.higherLevelHeader}>
+                  <Ionicons name="trending-up" size={14} color={colors.accent} />
+                  <Text variant="label" style={{ color: colors.text }}>
+                    A niveles más altos
+                  </Text>
+                </View>
+                {higherLevel.map((line, index) => (
+                  <Text key={`${spell._id}-higher-${index}`} variant="body" style={styles.higherLevelText}>
+                    {line}
+                  </Text>
+                ))}
               </View>
             )}
 
@@ -879,8 +989,62 @@ function SpellRow({
             )}
           </MotiView>
         )}
-      </AnimatePresence>
     </Card>
+    <CastSpellModal
+      visible={castOpen}
+      spell={spell}
+      slots={availableSlots}
+      onClose={() => setCastOpen(false)}
+      onCast={castWithSlot}
+    />
+    </>
+  );
+}
+
+function CastSpellModal({
+  visible,
+  spell,
+  slots,
+  onClose,
+  onCast,
+}: {
+  visible: boolean;
+  spell: Spell;
+  slots: { spellLevel: number; max: number; used: number }[];
+  onClose: () => void;
+  onCast: (slotLevel: number) => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <Pressable style={styles.castSheet} onPress={(e) => e.stopPropagation()}>
+          <Text variant="title">{spell.name}</Text>
+          <Text variant="caption" style={{ marginTop: 4 }}>
+            Elegí con qué espacio de hechizo lo querés lanzar.
+          </Text>
+          <View style={{ gap: 10, marginTop: 14 }}>
+            {slots.map((slot) => {
+              const notation = castNotationFor(spell, slot.spellLevel);
+              const remaining = slot.max - slot.used;
+              return (
+                <Pressable key={slot.spellLevel} style={styles.castOption} onPress={() => onCast(slot.spellLevel)}>
+                  <View style={{ flex: 1 }}>
+                    <Text variant="subtitle" style={{ fontSize: 15 }}>
+                      Nivel {slot.spellLevel}
+                    </Text>
+                    <Text variant="caption">
+                      {remaining} / {slot.max} disponibles{notation ? ` · tira ${notation}` : ""}
+                    </Text>
+                  </View>
+                  <Ionicons name="dice" size={18} color={colors.accent} />
+                </Pressable>
+              );
+            })}
+          </View>
+          <Button label="Cancelar" icon="close" variant="secondary" onPress={onClose} style={{ marginTop: 14 }} />
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -935,9 +1099,9 @@ function LevelUpModal({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
         <MotiView
-          from={{ opacity: 0, scale: 0.85 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ type: "spring", damping: 14 }}
+          from={{ opacity: 0, translateY: 18 }}
+          animate={{ opacity: 1, translateY: 0 }}
+          transition={{ type: "timing", duration: 180 }}
           style={[styles.levelSheet, shadow.glow]}
         >
           <LinearGradient colors={[colors.surfaceAlt, colors.surface]} style={StyleSheet.absoluteFill} />
@@ -978,7 +1142,7 @@ function LevelUpModal({
               <Button label={`Tirar d${hitDie} en la app`} icon="dice" variant="secondary" onPress={rollInApp} style={{ marginTop: 10 }} />
             </>
           ) : (
-            <MotiView from={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", damping: 10 }}>
+            <MotiView from={{ opacity: 0, translateY: 10 }} animate={{ opacity: 1, translateY: 0 }} transition={{ type: "timing", duration: 180 }}>
               <Text variant="display" center color={colors.accent}>
                 ¡Nivel {result.level}!
               </Text>
@@ -1032,6 +1196,43 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     alignItems: "center",
     justifyContent: "center",
+  },
+  higherLevelBox: {
+    marginTop: 12,
+    padding: 10,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+  },
+  higherLevelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 6,
+  },
+  higherLevelText: {
+    fontSize: 13,
+    color: colors.muted,
+  },
+  castSheet: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: radius.lg,
+    padding: 18,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  castOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+    padding: 12,
   },
   hpHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   hpNumbers: { fontFamily: font.display, fontSize: 24, color: colors.text },

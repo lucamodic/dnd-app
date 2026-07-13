@@ -101,6 +101,7 @@ export interface Spell {
   concentration: boolean;
   ritual: boolean;
   description: string[];
+  higherLevel?: string[];
   damageType: string;
   savingThrow: string;
   simpleDescription: string;
@@ -158,6 +159,7 @@ export interface InventoryItem {
 }
 
 export interface NoteSections {
+  characterInfo?: string;
   general: string;
   campaign: string;
   npcs: string;
@@ -233,15 +235,24 @@ export interface Monster {
   type: string;
 }
 
+const catalogQueryOptions = {
+  staleTime: 24 * 60 * 60 * 1000,
+  gcTime: 24 * 60 * 60 * 1000,
+  placeholderData: <T,>(previousData: T | undefined) => previousData,
+};
+
 /* ---------- Catálogo ---------- */
-export const useRaces = () => useQuery({ queryKey: ["races"], queryFn: () => api<Race[]>("/races") });
-export const useClasses = () => useQuery({ queryKey: ["classes"], queryFn: () => api<Clazz[]>("/classes") });
+export const useRaces = () =>
+  useQuery({ queryKey: ["races"], queryFn: () => api<Race[]>("/races"), ...catalogQueryOptions });
+export const useClasses = () =>
+  useQuery({ queryKey: ["classes"], queryFn: () => api<Clazz[]>("/classes"), ...catalogQueryOptions });
 
 export const useSubclasses = (classIndex?: string) =>
   useQuery({
     queryKey: ["subclasses", classIndex],
     queryFn: () => api<Subclass[]>(`/subclasses?classIndex=${classIndex}`),
     enabled: !!classIndex,
+    ...catalogQueryOptions,
   });
 
 export const useClassSpells = (classId?: string) =>
@@ -249,16 +260,18 @@ export const useClassSpells = (classId?: string) =>
     queryKey: ["spells", classId],
     queryFn: () => api<Spell[]>(`/spells?classId=${classId}`),
     enabled: !!classId,
+    ...catalogQueryOptions,
   });
 
 export const useMonsters = (search: string) =>
   useQuery({
     queryKey: ["monsters", search],
     queryFn: () => api<Monster[]>(`/monsters?search=${encodeURIComponent(search)}`),
+    ...catalogQueryOptions,
   });
 
 export const useWeapons = () =>
-  useQuery({ queryKey: ["weapons"], queryFn: () => api<Weapon[]>("/weapons") });
+  useQuery({ queryKey: ["weapons"], queryFn: () => api<Weapon[]>("/weapons"), ...catalogQueryOptions });
 
 /* ---------- Personajes ---------- */
 export const useCharacters = () =>
@@ -275,9 +288,19 @@ export const useUpdateCharacter = (id: string) => {
     onMutate: async (patch) => {
       await qc.cancelQueries({ queryKey: ["character", id] });
       const prev = qc.getQueryData<Character>(["character", id]);
-      // `knownSpells` se manda como array de ids (string) al backend, pero en cache son objetos
-      // Spell populados. No lo mezclamos optimistamente para no romper la forma; onSettled refetchea.
-      const { knownSpells, ...optimisticPatch } = patch;
+      const optimisticPatch = { ...patch };
+      if (prev && Array.isArray(patch.knownSpells)) {
+        const catalog = qc
+          .getQueriesData<Spell[]>({ queryKey: ["spells"] })
+          .flatMap(([, list]) => list || []);
+        const byId = new Map<string, Spell>();
+        for (const spell of [...catalog, ...(prev.knownSpells || [])]) {
+          if (spell && typeof spell === "object") byId.set(spell._id, spell);
+        }
+        optimisticPatch.knownSpells = (patch.knownSpells as unknown as string[])
+          .map((spellId) => byId.get(spellId))
+          .filter((spell): spell is Spell => !!spell);
+      }
       if (prev) qc.setQueryData<Character>(["character", id], { ...prev, ...optimisticPatch });
       return { prev };
     },

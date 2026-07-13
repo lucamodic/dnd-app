@@ -7,5 +7,11 @@ import { QueryClient } from "@tanstack/react-query";
  * veía por un instante los personajes del usuario anterior hasta que algo más invalidaba la query.
  */
 export const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      staleTime: 5 * 60 * 1000,
+      gcTime: 30 * 60 * 1000,
+    },
+  },
 });

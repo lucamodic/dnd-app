@@ -80,6 +80,14 @@ src/
   de vida, e información avanzada agrupada en rasgos de raza y habilidades de clase.
 - Los hechizos conocidos se limitan por nivel/clase. `Proyectil Mágico` debe tirarse como `1d4+1` por dardo,
   no como `3d4+3`.
+- Los hechizos conocidos que tengan `higherLevel` deben mostrar una sección **A niveles más altos** al desplegar
+  la card en la ficha, para explicar qué mejora si se usan con un espacio de hechizo superior.
+- Al tocar **Lanzar hechizo** en la ficha, los hechizos de nivel 1+ deben abrir un modal para elegir el nivel
+  del espacio disponible. Al confirmar, se tira el daño ajustado por `higherLevel` cuando el texto permite inferir
+  dados extra (`aumenta 1d6`, `dardo adicional`, `rayo adicional`, etc.) y se marca automáticamente ese espacio
+  como usado en `spellSlotsUsed`. Si el personaje solo tiene espacios del nivel base del hechizo, o si el hechizo
+  no tiene mejora aplicable a niveles más altos, debe tirar directo con botón `Lanzar XdY` y consumir el primer
+  espacio disponible sin abrir selector. Los trucos tiran directo y no consumen espacios.
 - `Armadura de Mago` se activa/desactiva desde el hechizo y usa `armor: "mage-armor"` para CA `13 + DEX`.
 - La vida temporal se guarda como `tempHp`, se ve junto con la vida normal, pinta azul en `HpBar`, y el daño
   descuenta primero temporal. En la ficha, el control de vida temporal está debajo de los botones `-5 -1 +1 +5`,
@@ -120,10 +128,13 @@ src/
   `WeaponSection` según qué slot disparó el picker (`pickerFor: string | "new" | null`). `character.weapon`
   (campo legacy singular) se sigue mandando como `weapons[0]` por compatibilidad, pero ya no se usa para
   mostrar un estado "equipada" en la UI.
-- El toggle "Permitir que los players suban de nivel" (`Tracker.levelUpEnabled`) vive en el **Perfil del DM**
-  (`app/(tabs)/profile.tsx`), no en la ficha de cada héroe — antes estaba repetido en cada personaje, lo que
+- El toggle "Permitir que los players suban de nivel" (`Tracker.levelUpEnabled`) vive en la pestaña **DM**
+  (`app/(tabs)/dm.tsx`), no en la ficha de cada héroe — antes estaba repetido en cada personaje, lo que
   no tenía sentido porque es una config global del tracker. La ficha solo muestra el aviso de "todavía no
   habilitado" a los Players cuando corresponde.
+- La configuración global del DM ahora vive en la pestaña **DM** (`app/(tabs)/dm.tsx`), visible solo para
+  `dm/admin`: toggle de subida de nivel, creación de Players, creación de armas custom y acceso a crear bichos
+  desde el tracker. `Perfil` queda para datos de cuenta y logout, con un acceso a esa pestaña para DM.
 - Descanso corto/largo: botones en la card de vida de la ficha (`app/character/[id].tsx`) abren `RestModal`
   (`src/components/sheet/editors.tsx`). Descanso largo llama `POST /characters/:id/full-rest` sin pedir nada
   más. Descanso corto deja elegir cuántos dados de golpe gastar (tope = `level - hitDiceUsed`) y cómo
@@ -133,6 +144,21 @@ src/
 - Bono racial flexible (+2/+1 de razas MPMM) en el wizard de creación: `raceAbilityBonusPreview` en
   `src/lib/format.ts` muestra, ANTES de crear el personaje, en qué característica va a caer cada bono y por
   qué (evita desperdiciar puntos contra el tope de 20 — replica `pickFlexibleRaceBonusTargets` del backend).
+- El modal de subir de nivel debe usar entrada sobria (`opacity`/`translateY` con timing corto), no spring con
+  escala grande, porque en celular se siente saltarín.
+- `noteSections` incluye la sección `characterInfo` ("Información del personaje") además de generales,
+  campaña, NPCs, lugares y otros. Requiere el campo homónimo en el modelo Mongo para que no se pierda al guardar.
+- Las filas expandibles de inventario/hechizos/rasgos no deben animar `height: "auto"`; en Android puede dejar
+  espacio fantasma al cerrar. Usar fade simple o dimensiones medidas.
+- Catálogos de backend (`races`, `classes`, `subclasses`, `spells`, `monsters`, `weapons`) usan cache de 24h
+  con `placeholderData` para mostrar datos viejos mientras refetchean. La selección de hechizos actualiza cache
+  optimista con objetos `Spell` desde el catálogo para evitar espera visual. En `Gestionar hechizos`, abrir/cerrar
+  niveles debe ser estado local liviano: no disparar requests ni montar filas con `Card` animado. La animación va
+  en el contenedor completo del nivel (fade/slide corto), no por fila. Los niveles bloqueados empiezan cerrados.
+- En formularios de armas no usar abreviaturas como `C/C` o `Dist.`; mostrar categorías completas:
+  "Simple cuerpo a cuerpo", "Simple a distancia", "Marcial cuerpo a cuerpo", "Marcial a distancia".
+  Esos selectores deben responder con `onPressIn` y cerrar teclado (`Keyboard.dismiss`) para que el teclado
+  no capture el primer toque al pasar desde un `TextInput` a otra categoría.
 
 ## Backlog solicitado / checklist de QA móvil
 Usar esta lista para validar en celular cuando se implementen los cambios pendientes:

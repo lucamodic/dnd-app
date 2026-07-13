@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, StyleSheet, View } from "react-native";
 import { router, useLocalSearchParams, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -35,6 +35,8 @@ export default function ManageSpells() {
   const [flashId, setFlashId] = useState<string | null>(null);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
+  const [closedLevels, setClosedLevels] = useState<Set<number>>(new Set());
+  const [lockedLevelsSeeded, setLockedLevelsSeeded] = useState(false);
   const [infoModal, setInfoModal] = useState<{ title: string; body: string } | null>(null);
 
   useEffect(() => {
@@ -55,6 +57,18 @@ export default function ManageSpells() {
       .sort((a, b) => a.level - b.level);
   }, [spells]);
 
+  useEffect(() => {
+    if (lockedLevelsSeeded || !byLevel.length || maxLvl < 0) return;
+    setClosedLevels((cur) => {
+      const next = new Set(cur);
+      for (const group of byLevel) {
+        if (group.level > maxLvl) next.add(group.level);
+      }
+      return next;
+    });
+    setLockedLevelsSeeded(true);
+  }, [byLevel, lockedLevelsSeeded, maxLvl]);
+
   // Límites por nivel: cuántos trucos y cuántos hechizos "de verdad" puede tener conocidos.
   const cantripMax = cls && character ? cantripLimit(cls, character.level) : 0;
   const spellMax = cls && character ? spellsKnownLimit(cls, character, character.level) : 0;
@@ -72,7 +86,18 @@ export default function ManageSpells() {
     setTimeout(() => setFlashId((cur) => (cur === id ? null : cur)), 900);
   };
 
-  const toggle = (spell: Spell, locked: boolean) => {
+  const toggleSpellOpen = useCallback((spellId: string) => {
+    setOpenIds((cur) => {
+      const next = new Set(cur);
+      if (next.has(spellId)) next.delete(spellId);
+      else next.add(spellId);
+      return next;
+    });
+  }, []);
+
+  const openConcentrationInfo = useCallback(() => setInfoModal(CONCENTRATION_INFO), []);
+
+  const toggle = useCallback((spell: Spell, locked: boolean) => {
     if (locked) return; // no se puede tocar un hechizo de nivel no desbloqueado
     const isKnown = knownIds.has(spell._id);
 
@@ -97,7 +122,7 @@ export default function ManageSpells() {
       { knownSpells: Array.from(next) as any },
       { onSettled: () => setPendingIds((cur) => { const out = new Set(cur); out.delete(spell._id); return out; }) }
     );
-  };
+  }, [cantripCount, cantripMax, knownIds, spellCount, spellMax, update]);
 
   return (
     <Screen>
@@ -136,93 +161,65 @@ export default function ManageSpells() {
         </View>
       )}
 
-      {byLevel.map((group) => (
-        <View key={group.level} style={{ marginBottom: 8 }}>
-          <Text variant="label" style={{ marginTop: 12, marginBottom: 8 }}>
-            {spellLevelLabel(group.level).toUpperCase()}
-            {group.level > maxLvl ? "  ·  bloqueado" : ""}
-          </Text>
-          {group.list.map((spell) => {
-            const known = knownIds.has(spell._id);
-            const locked = group.level > maxLvl;
-            const isCantrip = spell.level === 0;
-            const atLimit = !known && (isCantrip ? cantripCount >= cantripMax : spellCount >= spellMax);
-            const flashing = flashId === spell._id;
-            const pending = pendingIds.has(spell._id);
-            return (
-              <Pressable
-                key={spell._id}
-                onPress={() => setOpenIds((cur) => {
-                  const next = new Set(cur);
-                  if (next.has(spell._id)) next.delete(spell._id);
-                  else next.add(spell._id);
-                  return next;
-                })}
-              >
-                <Card style={[styles.row, (atLimit && !known) && { opacity: 0.6 }, flashing && styles.rowFlash]}>
-                  <View style={styles.spellHeader}>
-                    <Pressable onPress={(e) => { e.stopPropagation(); toggle(spell, locked); }} disabled={locked} hitSlop={8}>
-                      {pending ? (
-                        <ActivityIndicator color={colors.accent} />
-                      ) : (
-                        <Ionicons
-                          name={known ? "checkmark-circle" : "ellipse-outline"}
-                          size={22}
-                          color={known ? colors.accent : colors.muted}
-                        />
-                      )}
-                    </Pressable>
-                    <View style={{ flex: 1 }}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                        <Text variant="subtitle" style={{ fontSize: 15 }}>{spell.name}</Text>
-                        {spell.recommended && <Ionicons name="star" size={13} color={colors.warning} />}
-                      </View>
-                      <Text variant="caption" numberOfLines={1}>
-                        {locked ? "Se desbloquea al subir de nivel" : spell.simpleDescription || spell.school}
-                      </Text>
-                    </View>
-                    {!!spell.dice && !locked && (
-                      <View style={styles.dice}>
-                        <Text style={{ fontFamily: font.bodyBold, fontSize: 12, color: colors.text }}>{spell.dice}</Text>
-                      </View>
-                    )}
-                    <Ionicons name={openIds.has(spell._id) ? "chevron-up" : "chevron-down"} size={16} color={colors.textFaint} />
-                  </View>
-                  <AnimatePresence>
-                    {openIds.has(spell._id) && (
-                      <MotiView
-                        from={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" as any }}
-                        exit={{ opacity: 0, height: 0 }}
-                        transition={{ type: "timing", duration: 180 }}
-                      >
-                        <Text variant="body" style={{ marginTop: 10, fontSize: 14 }}>
-                          {spell.simpleDescription || spell.description?.join("\n\n") || "Sin descripción todavía."}
-                        </Text>
-                        <View style={styles.infoGrid}>
-                          <InfoPill icon="color-palette" label={spell.school} />
-                          <InfoPill icon="time" label={spell.castingTime} />
-                          <InfoPill icon="navigate" label={spell.range} />
-                          <InfoPill icon="hourglass" label={spell.duration} />
-                          {spell.concentration && <InfoPill icon="eye" label="Concentración" onPress={() => setInfoModal(CONCENTRATION_INFO)} />}
-                          {spell.ritual && <InfoPill icon="book" label="Ritual" />}
-                          {!!spell.damageType && <InfoPill icon="flame" label={`Daño: ${spell.damageType}`} />}
-                          {!!spell.savingThrow && <InfoPill icon="shield-checkmark" label={`Salvación: ${spell.savingThrow}`} />}
-                        </View>
-                      </MotiView>
-                    )}
-                  </AnimatePresence>
-                  {locked && (
-                    <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
-                      <View style={styles.lockOverlay} />
-                    </View>
-                  )}
-                </Card>
-              </Pressable>
-            );
-          })}
-        </View>
-      ))}
+      {byLevel.map((group) => {
+        const startsLockedClosed = !lockedLevelsSeeded && group.level > maxLvl;
+        const sectionOpen = !startsLockedClosed && !closedLevels.has(group.level);
+        return (
+          <View key={group.level} style={{ marginBottom: 8 }}>
+            <Pressable
+              onPress={() => setClosedLevels((cur) => {
+                const next = new Set(cur);
+                const isOpen = !next.has(group.level) && !(group.level > maxLvl && !lockedLevelsSeeded);
+                if (isOpen) next.add(group.level);
+                else next.delete(group.level);
+                return next;
+              })}
+              style={styles.levelHeader}
+            >
+              <Text variant="label">
+                {spellLevelLabel(group.level).toUpperCase()}
+                {group.level > maxLvl ? "  ·  bloqueado" : ""}
+              </Text>
+              <Ionicons name={sectionOpen ? "chevron-up" : "chevron-down"} size={18} color={colors.textFaint} />
+            </Pressable>
+            <AnimatePresence>
+              {sectionOpen && (
+                <MotiView
+                  key={`level-${group.level}`}
+                  from={{ opacity: 0, translateY: -6, scale: 0.995 }}
+                  animate={{ opacity: 1, translateY: 0, scale: 1 }}
+                  exit={{ opacity: 0, translateY: -4, scale: 0.995 }}
+                  transition={{ type: "timing", duration: 120 }}
+                >
+                  {group.list.map((spell) => {
+                    const known = knownIds.has(spell._id);
+                    const locked = group.level > maxLvl;
+                    const isCantrip = spell.level === 0;
+                    const atLimit = !known && (isCantrip ? cantripCount >= cantripMax : spellCount >= spellMax);
+                    const flashing = flashId === spell._id;
+                    const pending = pendingIds.has(spell._id);
+                    return (
+                      <SpellChoiceRow
+                        key={spell._id}
+                        spell={spell}
+                        known={known}
+                        locked={locked}
+                        atLimit={atLimit}
+                        flashing={flashing}
+                        pending={pending}
+                        open={openIds.has(spell._id)}
+                        onPress={toggleSpellOpen}
+                        onToggle={toggle}
+                        onConcentrationInfo={openConcentrationInfo}
+                      />
+                    );
+                  })}
+                </MotiView>
+              )}
+            </AnimatePresence>
+          </View>
+        );
+      })}
       <InfoModal info={infoModal} onClose={() => setInfoModal(null)} />
     </Screen>
   );
@@ -241,6 +238,85 @@ function InfoModal({ info, onClose }: { info: { title: string; body: string } | 
     </Modal>
   );
 }
+
+const SpellChoiceRow = memo(function SpellChoiceRow({
+  spell,
+  known,
+  locked,
+  atLimit,
+  flashing,
+  pending,
+  open,
+  onPress,
+  onToggle,
+  onConcentrationInfo,
+}: {
+  spell: Spell;
+  known: boolean;
+  locked: boolean;
+  atLimit: boolean;
+  flashing: boolean;
+  pending: boolean;
+  open: boolean;
+  onPress: (spellId: string) => void;
+  onToggle: (spell: Spell, locked: boolean) => void;
+  onConcentrationInfo: () => void;
+}) {
+  return (
+    <Pressable onPress={() => onPress(spell._id)} style={[styles.row, atLimit && !known && { opacity: 0.6 }, flashing && styles.rowFlash]}>
+      <View style={styles.spellHeader}>
+        <Pressable onPress={(e) => { e.stopPropagation(); onToggle(spell, locked); }} disabled={locked} hitSlop={8}>
+          {pending ? (
+            <ActivityIndicator color={colors.accent} />
+          ) : (
+            <Ionicons
+              name={known ? "checkmark-circle" : "ellipse-outline"}
+              size={22}
+              color={known ? colors.accent : colors.muted}
+            />
+          )}
+        </Pressable>
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <Text variant="subtitle" style={{ fontSize: 15 }}>{spell.name}</Text>
+            {spell.recommended && <Ionicons name="star" size={13} color={colors.warning} />}
+          </View>
+          <Text variant="caption" numberOfLines={1}>
+            {locked ? "Se desbloquea al subir de nivel" : spell.simpleDescription || spell.school}
+          </Text>
+        </View>
+        {!!spell.dice && !locked && (
+          <View style={styles.dice}>
+            <Text style={{ fontFamily: font.bodyBold, fontSize: 12, color: colors.text }}>{spell.dice}</Text>
+          </View>
+        )}
+        <Ionicons name={open ? "chevron-up" : "chevron-down"} size={16} color={colors.textFaint} />
+      </View>
+      {open && (
+        <MotiView from={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ type: "timing", duration: 140 }}>
+          <Text variant="body" style={{ marginTop: 10, fontSize: 14 }}>
+            {spell.simpleDescription || spell.description?.join("\n\n") || "Sin descripción todavía."}
+          </Text>
+          <View style={styles.infoGrid}>
+            <InfoPill icon="color-palette" label={spell.school} />
+            <InfoPill icon="time" label={spell.castingTime} />
+            <InfoPill icon="navigate" label={spell.range} />
+            <InfoPill icon="hourglass" label={spell.duration} />
+            {spell.concentration && <InfoPill icon="eye" label="Concentración" onPress={onConcentrationInfo} />}
+            {spell.ritual && <InfoPill icon="book" label="Ritual" />}
+            {!!spell.damageType && <InfoPill icon="flame" label={`Daño: ${spell.damageType}`} />}
+            {!!spell.savingThrow && <InfoPill icon="shield-checkmark" label={`Salvación: ${spell.savingThrow}`} />}
+          </View>
+        </MotiView>
+      )}
+      {locked && (
+        <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+          <View style={styles.lockOverlay} />
+        </View>
+      )}
+    </Pressable>
+  );
+});
 
 function InfoPill({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMap; label?: string; onPress?: () => void }) {
   if (!label) return null;
@@ -278,7 +354,28 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  row: { marginBottom: 8, paddingVertical: 12, overflow: "hidden" },
+  row: {
+    marginBottom: 8,
+    padding: 14,
+    overflow: "hidden",
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  levelHeader: {
+    marginTop: 12,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   spellHeader: { flexDirection: "row", alignItems: "center", gap: 12 },
   rowFlash: { borderColor: colors.danger, borderWidth: 1.5 },
   dice: {

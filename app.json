@@ -17,6 +17,9 @@
     },
     "android": {
       "package": "com.dndapp.beginners",
+      "edgeToEdgeEnabled": false,
+      "navigationBarColor": "#060407",
+      "navigationBarDividerColor": "#221932",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#221932"

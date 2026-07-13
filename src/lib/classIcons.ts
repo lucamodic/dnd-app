@@ -6,6 +6,7 @@ export type ClassIconDef =
 
 /** Ícono de símbolo por clase (se muestra sobre el color de la clase, en vez de una foto). */
 export const CLASS_ICON_DEFS: Record<string, ClassIconDef> = {
+  artificer: { family: "mdi", name: "wrench" },
   barbarian: { family: "mdi", name: "axe" },
   bard: { family: "ion", name: "musical-notes" },
   cleric: { family: "ion", name: "medkit" },
