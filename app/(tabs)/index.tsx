@@ -13,7 +13,7 @@ import { colors, radius } from "@/theme";
 
 export default function Home() {
   const user = useAuth((s) => s.user);
-  const { data: characters, isLoading, error } = useCharacters();
+  const { data: characters, isLoading, error, refetch } = useCharacters();
 
   return (
     <Screen>
@@ -30,8 +30,14 @@ export default function Home() {
       </Text>
 
       {isLoading && <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />}
-      {error && (
-        <Text color={colors.danger}>No se pudieron cargar tus personajes. ¿El backend está corriendo?</Text>
+      {!!error && (
+        <Card>
+          <Text variant="subtitle">No se pudieron cargar tus personajes</Text>
+          <Text variant="body" style={{ marginTop: 6 }}>
+            No se pudo conectar con el servidor. Revisá tu conexión e intentá de nuevo.
+          </Text>
+          <Button label="Reintentar" icon="refresh" variant="secondary" small onPress={() => refetch()} style={{ marginTop: 10 }} />
+        </Card>
       )}
 
       {characters?.length === 0 && !isLoading && (

@@ -28,7 +28,8 @@ export default function Login() {
         body: { username: username.trim(), password },
       });
       await setSession(data.token, data.user);
-      router.replace("/(tabs)");
+      // Pasamos por "/" para que decida entre onboarding (primera vez) y la app.
+      router.replace("/");
     } catch (e: any) {
       setError(e?.message || "No se pudo iniciar sesión");
     } finally {

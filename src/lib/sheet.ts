@@ -173,8 +173,26 @@ export function weaponAttackInfo(character: Character, weapon: Weapon) {
     ability,
     abilityLabel,
     abilityBonus,
-    attackBonus: abilityBonus + character.proficiencyBonus,
+    isRanged,
+    attackBonus: abilityBonus + character.proficiencyBonus + (weapon.bonus || 0),
   };
+}
+
+/** Bono de daño de furia del bárbaro a este nivel (0 si la clase no tiene ese recurso). */
+export function rageDamageBonus(cls: Clazz, character: Character): number {
+  const prog = progressionAt(cls, character.level);
+  return prog?.resources?.find((r) => r.key === "rage_damage_bonus")?.value || 0;
+}
+
+/**
+ * Daño extra de furia aplicable a un ataque puntual: solo si el personaje está en furia y el ataque
+ * es cuerpo a cuerpo con Fuerza (regla oficial). Devuelve 0 si no corresponde.
+ */
+export function rageBonusForAttack(cls: Clazz, character: Character, weapon: Weapon): number {
+  if (!character.raging) return 0;
+  const info = weaponAttackInfo(character, weapon);
+  if (info.isRanged || info.ability !== "str") return 0;
+  return rageDamageBonus(cls, character);
 }
 
 /** Iniciativa = mod de Destreza + bonus del personaje. */

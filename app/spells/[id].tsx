@@ -128,7 +128,14 @@ export default function ManageSpells() {
     <Screen>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.top}>
-        <Ionicons name="arrow-back" size={24} color={colors.text} onPress={() => router.back()} />
+        <Ionicons
+          name="arrow-back"
+          size={24}
+          color={colors.text}
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Volver"
+        />
         <Text variant="title">Gestionar hechizos</Text>
         <View style={{ width: 24 }} />
       </View>

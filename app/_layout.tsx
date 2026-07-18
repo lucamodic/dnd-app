@@ -17,6 +17,7 @@ import {
   Inter_700Bold,
 } from "@expo-google-fonts/inter";
 import { DiceProvider } from "@/components/dice/DiceProvider";
+import { ToastProvider } from "@/components/Toast";
 import { useAuth } from "@/store/auth";
 import { queryClient } from "@/api/queryClient";
 import { colors } from "@/theme";
@@ -60,16 +61,18 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: colors.bg }}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
-          <DiceProvider>
-            <StatusBar style="light" />
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: colors.bg },
-                animation: "slide_from_right",
-              }}
-            />
-          </DiceProvider>
+          <ToastProvider>
+            <DiceProvider>
+              <StatusBar style="light" />
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: colors.bg },
+                  animation: "slide_from_right",
+                }}
+              />
+            </DiceProvider>
+          </ToastProvider>
         </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

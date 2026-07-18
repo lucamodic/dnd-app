@@ -71,7 +71,14 @@ export default function NewCharacter() {
         contentContainerStyle={[styles.scrollContent, step < (cls?.subclassLevel === 1 ? 3 : 2) && { paddingBottom: 150 + insets.bottom }]}
       >
         <View style={styles.header}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} onPress={() => (step === 0 ? router.back() : setStep((s) => (s - 1) as Step))} />
+          <Ionicons
+            name="arrow-back"
+            size={24}
+            color={colors.text}
+            onPress={() => (step === 0 ? router.back() : setStep((s) => (s - 1) as Step))}
+            accessibilityRole="button"
+            accessibilityLabel="Volver"
+          />
           <StepDots step={step} total={cls?.subclassLevel === 1 ? 4 : 3} />
           <View style={{ width: 24 }} />
         </View>

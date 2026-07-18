@@ -8,13 +8,15 @@ interface Props {
   used: number;
   onChange: (used: number) => void;
   color?: string;
+  /** Nombre del recurso para el accessibilityLabel de cada pip (ej. "Furia", "Espacio de nivel 1"). */
+  label?: string;
 }
 
 /**
  * Fila de "pips" (puntitos) para rastrear un recurso. Los gastados quedan apagados.
  * Tocar un pip lleno lo gasta; tocar uno gastado lo recupera.
  */
-export function Pips({ max, used, onChange, color = colors.accent }: Props) {
+export function Pips({ max, used, onChange, color = colors.accent, label = "Punto" }: Props) {
   const handle = (index: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const available = max - used; // pips llenos (a la izquierda)
@@ -28,7 +30,13 @@ export function Pips({ max, used, onChange, color = colors.accent }: Props) {
       {Array.from({ length: max }).map((_, i) => {
         const filled = i < max - used;
         return (
-          <Pressable key={i} onPress={() => handle(i)} hitSlop={6}>
+          <Pressable
+            key={i}
+            onPress={() => handle(i)}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel={`${label} ${i + 1} de ${max}, ${filled ? "disponible" : "usado"}`}
+          >
             <MotiView
               animate={{
                 borderColor: filled ? color : colors.muted,

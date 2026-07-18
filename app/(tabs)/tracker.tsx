@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, StyleSheet, TextInput, View, FlatList } from "react-native";
+import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { MotiView } from "moti";
 import { LinearGradient } from "expo-linear-gradient";
@@ -20,21 +21,31 @@ import {
   useTrackerRemove,
   useTrackerPatch,
   useMonsters,
+  useCharacter,
+  useWeapons,
   Participant,
+  Clazz,
 } from "@/api/hooks";
 import { useAuth } from "@/store/auth";
+import { useDice } from "@/components/dice/DiceProvider";
+import { weaponAttackInfo, rageBonusForAttack } from "@/lib/sheet";
+import { formatMod } from "@/lib/format";
+import { doubleForCrit } from "@/lib/dice";
+import { WEAPON_BY_INDEX, Weapon } from "@/data/weapons";
 import { colors, font, radius, shadow } from "@/theme";
 
 export default function TrackerTab() {
   const user = useAuth((s) => s.user);
   const isAdmin = user?.role === "dm" || user?.role === "admin";
-  const { data: tracker, isLoading } = useTracker();
+  const { data: tracker, isLoading, isError, refetch } = useTracker();
   const next = useTrackerNext();
   const sort = useTrackerSort();
   const reset = useTrackerReset();
   const [addOpen, setAddOpen] = useState(false);
 
   const participants = tracker?.participants || [];
+  const activeParticipant = tracker && tracker.activeIndex != null ? participants[tracker.activeIndex] : undefined;
+  const isMyTurn = !!activeParticipant && activeParticipant.ownerUserId === user?.id && !!activeParticipant.characterId;
 
   return (
     <Screen scroll={false} padded={false}>
@@ -55,7 +66,19 @@ export default function TrackerTab() {
 
       {isLoading && <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />}
 
-      {!isLoading && participants.length === 0 && (
+      {isError && !tracker && (
+        <View style={{ paddingHorizontal: 20 }}>
+          <Card>
+            <Text variant="subtitle">No se pudo cargar el combate</Text>
+            <Text variant="body" style={{ marginTop: 6 }}>
+              Revisá tu conexión. Se sigue reintentando solo cada pocos segundos.
+            </Text>
+            <Button label="Reintentar ahora" icon="refresh" onPress={() => refetch()} style={{ marginTop: 12 }} />
+          </Card>
+        </View>
+      )}
+
+      {!isLoading && !isError && participants.length === 0 && (
         <View style={{ paddingHorizontal: 20 }}>
           <Card>
             <Text variant="subtitle">No hay nadie en combate</Text>
@@ -64,6 +87,12 @@ export default function TrackerTab() {
               {isAdmin ? " Como DM, agregá bichos con el botón de abajo." : ""}
             </Text>
           </Card>
+        </View>
+      )}
+
+      {isMyTurn && activeParticipant?.characterId && (
+        <View style={{ paddingHorizontal: 20, marginBottom: 14 }}>
+          <MyTurnPanel characterId={activeParticipant.characterId} participantName={activeParticipant.name} />
         </View>
       )}
 
@@ -111,6 +140,80 @@ export default function TrackerTab() {
 
       {isAdmin && <AddMonsterModal visible={addOpen} onClose={() => setAddOpen(false)} />}
     </Screen>
+  );
+}
+
+/** Panel didáctico + atajos que aparece cuando es el turno del PJ del usuario. */
+function MyTurnPanel({ characterId, participantName }: { characterId: string; participantName: string }) {
+  const { data: character } = useCharacter(characterId);
+  const { data: dbWeapons } = useWeapons();
+  const { roll } = useDice();
+  const [lastAttackCrit, setLastAttackCrit] = useState(false);
+  const weaponByIndex = useMemo(
+    () => ({ ...WEAPON_BY_INDEX, ...Object.fromEntries((dbWeapons || []).map((w) => [w.index, w])) }),
+    [dbWeapons]
+  );
+
+  if (!character) return null;
+  const cls = character.classId && typeof character.classId === "object" ? (character.classId as Clazz) : undefined;
+  const isCaster = !!cls?.spellcasting;
+  const weaponIndex = character.weapons?.[0] || character.weapon || "unarmed";
+  const weapon: Weapon = weaponByIndex[weaponIndex] || weaponByIndex["unarmed"];
+  const attack = weaponAttackInfo(character, weapon);
+  const rageBonus = cls ? rageBonusForAttack(cls, character, weapon) : 0;
+  const totalDamageBonus = attack.abilityBonus + (weapon.bonus || 0) + rageBonus;
+  // Daño con dados o fijo (golpe sin arma = "1" -> "1d1", un d1 siempre sale 1).
+  const hasDamage = !!weapon.damageDice && weapon.damageDice !== "0";
+  const damageDicePart = weapon.damageDice.includes("d") ? weapon.damageDice : `${weapon.damageDice}d1`;
+  const baseDamage = hasDamage ? `${damageDicePart}${formatMod(totalDamageBonus)}` : "";
+  const damageNotation = lastAttackCrit ? doubleForCrit(baseDamage) : baseDamage;
+
+  const attackRoll = () => {
+    roll(`1d20${formatMod(attack.attackBonus)}`, `${weapon.name} · Ataque`, {
+      kind: "attack",
+      onResolved: (res) => setLastAttackCrit(!!res.nat20),
+    });
+  };
+  const damageRoll = () => {
+    if (!baseDamage) return;
+    roll(damageNotation, `${weapon.name} · Daño${lastAttackCrit ? " (¡Crítico!)" : ""}`, { kind: "damage" });
+    setLastAttackCrit(false);
+  };
+
+  return (
+    <Card accent={colors.accent}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Ionicons name="flash" size={16} color={colors.accent} />
+        <Text variant="subtitle">¡Es tu turno, {participantName}!</Text>
+      </View>
+      <Text variant="caption" style={{ marginTop: 8 }}>
+        Movimiento: hasta {character.speed} pies · Acción: atacar, lanzar un hechizo, correr, ayudar o esconderte
+        {"  ·  "}Acción adicional: si tu clase tiene una, usala ahora · Reacción: se guarda para cuando otro actúe.
+      </Text>
+      <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+        <View style={{ flex: 1 }}>
+          <Button label="Atacar" icon="flash" small onPress={attackRoll} />
+        </View>
+        {!!baseDamage && (
+          <View style={{ flex: 1 }}>
+            <Button label={damageNotation} icon="dice" small variant={lastAttackCrit ? undefined : "secondary"} onPress={damageRoll} />
+          </View>
+        )}
+      </View>
+      {isCaster && (
+        <Button
+          label="Lanzar hechizo (ir a la ficha)"
+          icon="sparkles"
+          small
+          variant="secondary"
+          style={{ marginTop: 8 }}
+          onPress={() => router.push(`/character/${characterId}`)}
+        />
+      )}
+      <Text variant="caption" color={colors.textFaint} style={{ marginTop: 8 }}>
+        ¿No sabés qué hacer? Atacá o pedile ayuda al DM.
+      </Text>
+    </Card>
   );
 }
 
@@ -212,14 +315,16 @@ function ParticipantRow({
 
       {canEdit && (
         <View style={styles.pActions}>
-          <MiniBtn icon="medical" onPress={() => setConditionsOpen(true)} />
+          <MiniBtn icon="medical" onPress={() => setConditionsOpen(true)} label={`Editar estados de ${participant.name}`} />
           {canSeeHp && (
             <>
-              <MiniBtn icon="remove" onPress={() => setHpChange("damage")} />
-              <MiniBtn icon="add" onPress={() => setHpChange("heal")} />
+              <MiniBtn icon="remove" onPress={() => setHpChange("damage")} label={`Hacer daño a ${participant.name}`} />
+              <MiniBtn icon="add" onPress={() => setHpChange("heal")} label={`Curar a ${participant.name}`} />
             </>
           )}
-          {(isAdmin || isOwner) && <MiniBtn icon="close" onPress={() => remove.mutate(participant._id)} danger />}
+          {(isAdmin || isOwner) && (
+            <MiniBtn icon="close" onPress={() => remove.mutate(participant._id)} danger label={`Quitar a ${participant.name} del combate`} />
+          )}
         </View>
       )}
 
@@ -471,9 +576,24 @@ function SmallControl({ icon, label, onPress, highlight }: { icon: keyof typeof 
   );
 }
 
-function MiniBtn({ icon, onPress, danger }: { icon: keyof typeof Ionicons.glyphMap; onPress: () => void; danger?: boolean }) {
+function MiniBtn({
+  icon,
+  onPress,
+  danger,
+  label,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  onPress: () => void;
+  danger?: boolean;
+  label?: string;
+}) {
   return (
-    <Pressable onPress={onPress} style={[styles.miniBtn, danger && { backgroundColor: colors.danger + "33" }]}>
+    <Pressable
+      onPress={onPress}
+      style={[styles.miniBtn, danger && { backgroundColor: colors.danger + "33" }]}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
       <Ionicons name={icon} size={16} color={danger ? colors.danger : colors.text} />
     </Pressable>
   );

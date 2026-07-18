@@ -104,6 +104,8 @@ export interface Spell {
   higherLevel?: string[];
   damageType: string;
   savingThrow: string;
+  /** "melee" | "ranged" si pide tirada de ataque de conjuro; "" si impacta solo o pide salvación. */
+  attackType?: string;
   simpleDescription: string;
   dice: string;
   recommended?: boolean; // viene en GET /spells?classId= (para la pantalla de gestionar)
@@ -141,6 +143,8 @@ export interface Weapon {
   properties: string[];
   description: string;
   custom?: boolean;
+  /** Bono mágico (+0 a +3); suma a ataque y daño. Solo el DM la carga al crear el arma. */
+  bonus?: number;
 }
 
 export interface UserSummary {
@@ -196,6 +200,9 @@ export interface Character {
   inventoryItems: InventoryItem[];
   notes: string;
   noteSections: NoteSections;
+  deathSaves: { successes: number; failures: number };
+  raging?: boolean;
+  concentratingSpell?: string;
   raceId: Race | string;
   classId: Clazz | string;
   subclassIndex: string;
@@ -355,6 +362,7 @@ export const useCreateWeapon = () => {
       damageType?: string;
       properties?: string[];
       description?: string;
+      bonus?: number;
     }) => api<Weapon>("/weapons", { method: "POST", body }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["weapons"] }),
   });

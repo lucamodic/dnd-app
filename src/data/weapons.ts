@@ -9,6 +9,8 @@ export interface Weapon {
   damageType: string;
   properties: string[];
   description: string;
+  /** Bono mágico (+0 a +3); suma a ataque y daño. Solo el DM la carga al crear el arma. */
+  bonus?: number;
 }
 
 export const WEAPON_CATEGORY_LABEL: Record<WeaponCategory, string> = {

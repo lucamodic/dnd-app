@@ -11,12 +11,16 @@ import {
   setResourceUsed,
   setSpellSlotUsed,
   weaponAttackInfo,
+  rageDamageBonus,
+  rageBonusForAttack,
 } from "@/lib/sheet";
 import { ABILITY_LABELS, formatMod } from "@/lib/format";
+import { doubleForCrit } from "@/lib/dice";
 import { naturalWeaponIndexesForRace, WEAPON_BY_INDEX, WEAPONS, Weapon } from "@/data/weapons";
 import { Text } from "@/components/Text";
 import { Button } from "@/components/Button";
-import { useDice } from "@/components/dice/DiceProvider";
+import { useDice, RollOptions } from "@/components/dice/DiceProvider";
+import { useRollMode } from "@/store/rollMode";
 import { useAuth } from "@/store/auth";
 import { Pips } from "./Pips";
 import { WeaponModal } from "./editors";
@@ -53,6 +57,8 @@ export function WeaponSection({ character, cls, race, update }: { character: Cha
   const carriedWeapons = Array.from(new Set((character.weapons || []).filter(Boolean)));
   const ownedWeapons = Array.from(new Set([...carriedWeapons, ...naturalWeapons]));
   const needsWeapon = carriedWeapons.length === 0;
+  const rageBonus = rageDamageBonus(cls, character);
+  const raging = !!character.raging;
 
   const replaceWeapon = (oldIndex: string | null, newIndex: string) => {
     const next = oldIndex
@@ -75,9 +81,27 @@ export function WeaponSection({ character, cls, race, update }: { character: Cha
           <Text variant="caption" color={colors.warning}>Agregá un arma para calcular bien ataque y daño.</Text>
         </View>
       )}
+      {rageBonus > 0 && (
+        <Pressable
+          onPress={() => update({ raging: !raging })}
+          style={[styles.rageToggle, raging && styles.rageToggleActive]}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: raging }}
+          accessibilityLabel="Furia del bárbaro"
+        >
+          <Ionicons name="flame" size={18} color={raging ? colors.warning : colors.textFaint} />
+          <View style={{ flex: 1 }}>
+            <Text variant="subtitle" style={{ fontSize: 14 }}>{raging ? "En furia" : "Entrar en furia"}</Text>
+            <Text variant="caption">
+              {raging ? `Sumás +${rageBonus} al daño cuerpo a cuerpo con Fuerza.` : `Suma +${rageBonus} al daño cuerpo a cuerpo con Fuerza.`}
+            </Text>
+          </View>
+          <Ionicons name={raging ? "toggle" : "toggle-outline"} size={30} color={raging ? colors.warning : colors.muted} />
+        </Pressable>
+      )}
       <View style={{ gap: 8 }}>
         {ownedWeapons.length === 0 && (
-          <WeaponCard weaponIndex="unarmed" weaponByIndex={weaponByIndex} character={character} roll={roll} onChange={() => setPickerFor("new")} />
+          <WeaponCard weaponIndex="unarmed" weaponByIndex={weaponByIndex} character={character} cls={cls} roll={roll} onChange={() => setPickerFor("new")} />
         )}
         {ownedWeapons.map((weaponIndex) => {
           const natural = naturalWeapons.includes(weaponIndex);
@@ -87,6 +111,7 @@ export function WeaponSection({ character, cls, race, update }: { character: Cha
               weaponIndex={weaponIndex}
               weaponByIndex={weaponByIndex}
               character={character}
+              cls={cls}
               natural={natural}
               roll={roll}
               onChange={natural ? undefined : () => setPickerFor(weaponIndex)}
@@ -139,6 +164,7 @@ function CreateWeaponModal({
   const [damageType, setDamageType] = useState("Cortante");
   const [properties, setProperties] = useState("");
   const [description, setDescription] = useState("");
+  const [bonus, setBonus] = useState(0);
 
   useEffect(() => {
     if (!visible) return;
@@ -148,6 +174,7 @@ function CreateWeaponModal({
     setDamageType("Cortante");
     setProperties("");
     setDescription("");
+    setBonus(0);
   }, [visible]);
 
   const save = async () => {
@@ -159,6 +186,7 @@ function CreateWeaponModal({
       damageType: damageType.trim(),
       properties: properties.split(",").map((p) => p.trim()).filter(Boolean),
       description: description.trim(),
+      bonus,
     });
     onCreated(weapon.index);
     onClose();
@@ -207,6 +235,22 @@ function CreateWeaponModal({
               multiline
               style={[styles.itemInput, styles.itemDescriptionInput]}
             />
+            <Text variant="label" style={{ marginTop: 4, marginBottom: 6 }}>BONO MÁGICO (SOLO DM)</Text>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              {[0, 1, 2, 3].map((value) => (
+                <Pressable
+                  key={value}
+                  onPressIn={() => {
+                    Keyboard.dismiss();
+                    setBonus(value);
+                  }}
+                  hitSlop={6}
+                  style={[styles.bonusPill, bonus === value && styles.bonusPillActive]}
+                >
+                  <Text style={styles.weaponCategoryText}>{value === 0 ? "Ninguno" : `+${value}`}</Text>
+                </Pressable>
+              ))}
+            </View>
           </ScrollView>
           <Button label="Crear y dar" icon="checkmark" onPress={save} loading={createWeapon.isPending} disabled={!name.trim()} style={{ marginTop: 12 }} />
         </View>
@@ -219,6 +263,7 @@ function WeaponCard({
   weaponIndex,
   weaponByIndex,
   character,
+  cls,
   natural,
   roll,
   onChange,
@@ -227,56 +272,96 @@ function WeaponCard({
   weaponIndex: string;
   weaponByIndex: Record<string, Weapon>;
   character: Character;
+  cls?: Clazz;
   natural?: boolean;
-  roll: (notation: string, label?: string) => void;
+  roll: (notation: string, label?: string, opts?: RollOptions) => void;
   onChange?: () => void;
   onRemove?: () => void;
 }) {
+  const [lastAttackCrit, setLastAttackCrit] = useState(false);
+  const consumeMode = useRollMode((s) => s.consumeMode);
   const weapon = weaponByIndex[weaponIndex] || weaponByIndex["unarmed"];
   const attack = weaponAttackInfo(character, weapon);
-  const damageNotation = weapon.damageDice && weapon.damageDice.includes("d")
-    ? `${weapon.damageDice}${attack.abilityBonus >= 0 ? `+${attack.abilityBonus}` : attack.abilityBonus}`
+  const rageBonus = cls ? rageBonusForAttack(cls, character, weapon) : 0;
+  const totalDamageBonus = attack.abilityBonus + (weapon.bonus || 0) + rageBonus;
+  // Daño con dados (ej. "1d6") o daño fijo (ej. golpe sin arma = "1"): el fijo se representa como
+  // "Nd1" (un d1 siempre sale N) para que también tenga botón de "tirar" y sume el modificador.
+  const hasDamage = !!weapon.damageDice && weapon.damageDice !== "0";
+  const isFlatDamage = hasDamage && !weapon.damageDice.includes("d");
+  const flatValue = isFlatDamage ? parseInt(weapon.damageDice, 10) || 0 : 0;
+  const damageDicePart = isFlatDamage ? `${weapon.damageDice}d1` : weapon.damageDice;
+  const baseDamageNotation = hasDamage
+    ? `${damageDicePart}${totalDamageBonus >= 0 ? `+${totalDamageBonus}` : totalDamageBonus}`
     : "";
+  const damageNotation = lastAttackCrit ? doubleForCrit(baseDamageNotation) : baseDamageNotation;
+  // Para daño fijo mostramos el total (ej. "4") en vez de "1d1+3"; el crítico duplica dados y bono.
+  const flatTotal = lastAttackCrit ? flatValue * 2 + totalDamageBonus * 2 : flatValue + totalDamageBonus;
+  const damageLabel = isFlatDamage ? `${flatTotal}` : damageNotation;
+
   return (
-    <Pressable onPress={onChange} disabled={!onChange} style={styles.weaponRow}>
-      <View style={styles.weaponIcon}>
-        <Ionicons name={natural ? "sparkles" : "flash"} size={16} color={colors.accent} />
+    <View style={styles.weaponCard}>
+      <Pressable onPress={onChange} disabled={!onChange} style={styles.weaponTop}>
+        <View style={styles.weaponIcon}>
+          <Ionicons name={natural ? "sparkles" : "flash"} size={16} color={colors.accent} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text variant="subtitle" style={{ fontSize: 15 }}>
+            {weapon.name}
+            {!!weapon.bonus && <Text style={{ color: colors.success }}> +{weapon.bonus}</Text>}
+          </Text>
+          <Text variant="caption">
+            {weapon.damageDice ? `${weapon.damageDice} ${weapon.damageType}` : weapon.description}
+            {"  ·  "}
+            Ataque d20 {formatMod(attack.attackBonus)}
+            {"  ·  "}
+            Daño {formatMod(totalDamageBonus)} {attack.abilityLabel}
+            {rageBonus > 0 && <Text style={{ color: colors.warning }}>{"  ·  furia +"}{rageBonus}</Text>}
+          </Text>
+          {natural && <Text variant="caption" color={colors.accent}>Racial</Text>}
+        </View>
+        {onRemove && (
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={`Quitar ${weapon.name}`}
+          >
+            <Ionicons name="close" size={16} color={colors.textFaint} />
+          </Pressable>
+        )}
+      </Pressable>
+      <View style={styles.weaponActions}>
+        <Button
+          label="Atacar"
+          icon="flash"
+          small
+          style={{ flex: 1 }}
+          onPress={() =>
+            roll(`1d20${formatMod(attack.attackBonus)}`, `${weapon.name} · Ataque`, {
+              kind: "attack",
+              mode: consumeMode(),
+              onResolved: (res) => setLastAttackCrit(!!res.nat20),
+            })
+          }
+        />
+        {!!baseDamageNotation && (
+          <Button
+            label={`Daño ${damageLabel}`}
+            icon="dice"
+            small
+            variant={lastAttackCrit ? "primary" : "secondary"}
+            style={{ flex: 1 }}
+            onPress={() => {
+              roll(damageNotation, `${weapon.name} · Daño${lastAttackCrit ? " (¡Crítico!)" : ""}`, { kind: "damage" });
+              setLastAttackCrit(false);
+            }}
+          />
+        )}
       </View>
-      <View style={{ flex: 1 }}>
-        <Text variant="subtitle" style={{ fontSize: 15 }}>{weapon.name}</Text>
-        <Text variant="caption">
-          {weapon.damageDice ? `${weapon.damageDice} ${weapon.damageType}` : weapon.description}
-          {"  ·  "}
-          Ataque d20 {formatMod(attack.attackBonus)}
-          {"  ·  "}
-          Daño {formatMod(attack.abilityBonus)} {attack.abilityLabel}
-        </Text>
-        {natural && <Text variant="caption" color={colors.accent}>Racial</Text>}
-      </View>
-      {!!damageNotation && (
-        <Pressable
-          onPress={(e) => {
-            e.stopPropagation();
-            roll(damageNotation, `${weapon.name} · ${damageNotation}`);
-          }}
-          style={styles.weaponRollBtn}
-        >
-          <Ionicons name="dice" size={16} color={colors.text} />
-          <Text style={styles.weaponRollText}>{damageNotation}</Text>
-        </Pressable>
-      )}
-      {onRemove && (
-        <Pressable
-          onPress={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          hitSlop={8}
-        >
-          <Ionicons name="close" size={16} color={colors.textFaint} />
-        </Pressable>
-      )}
-    </Pressable>
+    </View>
   );
 }
 
@@ -347,10 +432,10 @@ function ItemRow({ item, onEdit, onRemove }: { item: Character["inventoryItems"]
           </MotiView>
         )}
       </Pressable>
-      <Pressable onPress={onEdit} hitSlop={8}>
+      <Pressable onPress={onEdit} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Editar ${item.text}`}>
         <Ionicons name="create-outline" size={16} color={colors.textFaint} />
       </Pressable>
-      <Pressable onPress={onRemove} hitSlop={8}>
+      <Pressable onPress={onRemove} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Quitar ${item.text}`}>
         <Ionicons name="close" size={16} color={colors.textFaint} />
       </Pressable>
     </View>
@@ -540,6 +625,8 @@ export function SkillsSection({
   cls: Clazz;
   update: UpdateFn;
 }) {
+  const { roll } = useDice();
+  const consumeMode = useRollMode((s) => s.consumeMode);
   const toggle = (index: string) => {
     const current = character.skillProficiencies || [];
     const next = current.includes(index) ? current.filter((s) => s !== index) : [...current, index];
@@ -551,7 +638,7 @@ export function SkillsSection({
     <View>
       <Text variant="caption" style={{ marginBottom: 10 }}>
         Tu clase elige {cls.skillChoiceCount}. Tocá el círculo para marcar en cuáles sos competente
-        (suma tu bono de +{character.proficiencyBonus}).
+        (suma tu bono de +{character.proficiencyBonus}). Tocá el dado para tirarla.
       </Text>
       <View style={{ gap: 2 }}>
         {sortedSkills.map((skill) => {
@@ -559,21 +646,32 @@ export function SkillsSection({
           const mod = skillModifier(skill, character);
           const suggested = cls.skillOptions?.includes(skill.index);
           return (
-            <Pressable key={skill.index} onPress={() => toggle(skill.index)} style={styles.skillRow}>
-              <Ionicons
-                name={proficient ? "checkmark-circle" : "ellipse-outline"}
-                size={20}
-                color={proficient ? colors.accent : colors.muted}
-              />
-              <Text variant="body" style={{ flex: 1, fontSize: 14, color: colors.text }}>
-                {skill.label}
-                {suggested && <Text variant="caption" color={colors.muted}>{"  ·  de tu clase"}</Text>}
-              </Text>
+            <View key={skill.index} style={styles.skillRow}>
+              <Pressable onPress={() => toggle(skill.index)} style={styles.skillToggle}>
+                <Ionicons
+                  name={proficient ? "checkmark-circle" : "ellipse-outline"}
+                  size={20}
+                  color={proficient ? colors.accent : colors.muted}
+                />
+                <Text variant="body" style={{ flex: 1, fontSize: 14, color: colors.text }}>
+                  {skill.label}
+                  {suggested && <Text variant="caption" color={colors.muted}>{"  ·  de tu clase"}</Text>}
+                </Text>
+              </Pressable>
               <Text variant="caption" color={colors.textFaint}>
                 {ABILITY_LABELS[skill.ability]}
               </Text>
-              <Text style={styles.skillMod}>{formatMod(mod)}</Text>
-            </Pressable>
+              <Pressable
+                hitSlop={8}
+                onPress={() => roll(`1d20${formatMod(mod)}`, skill.label, { kind: "skill", mode: consumeMode() })}
+                style={styles.skillRollBtn}
+                accessibilityRole="button"
+                accessibilityLabel={`Tirar ${skill.label}, modificador ${formatMod(mod)}`}
+              >
+                <Ionicons name="dice-outline" size={13} color={colors.accent} />
+                <Text style={styles.skillMod}>{formatMod(mod)}</Text>
+              </Pressable>
+            </View>
           );
         })}
       </View>
@@ -682,6 +780,7 @@ function TrackableResource({
       <Pips
         max={resource.value}
         used={resource.used}
+        label={resource.label}
         onChange={(used) => update({ resourcesUsed: setResourceUsed(character, resource.key, used) })}
       />
       <Text variant="caption" style={{ marginTop: 6 }}>
@@ -723,6 +822,7 @@ export function SpellSlotsSection({
             max={slot.max}
             used={slot.used}
             color={colors.secondary}
+            label={`Espacio de nivel ${slot.spellLevel}`}
             onChange={(used) => update({ spellSlotsUsed: setSpellSlotUsed(character, slot.spellLevel - 1, used) })}
           />
         </View>
@@ -745,16 +845,28 @@ function StepBtn({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMa
 }
 
 const styles = StyleSheet.create({
-  weaponRow: {
+  rageToggle: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  rageToggleActive: { borderColor: colors.warning, backgroundColor: colors.warning + "1A" },
+  weaponCard: {
     backgroundColor: colors.surfaceAlt,
     borderRadius: radius.md,
     padding: 12,
     borderWidth: 1,
     borderColor: colors.border,
+    gap: 10,
   },
+  weaponTop: { flexDirection: "row", alignItems: "center", gap: 12 },
+  weaponActions: { flexDirection: "row", gap: 8 },
   weaponIcon: {
     width: 34,
     height: 34,
@@ -763,16 +875,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  weaponRollBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    backgroundColor: colors.primary,
-    borderRadius: radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  weaponRollText: { fontFamily: font.bodyBold, fontSize: 12, color: colors.text },
   weaponWarning: {
     flexDirection: "row",
     alignItems: "center",
@@ -847,6 +949,16 @@ const styles = StyleSheet.create({
   },
   weaponCategoryBtnActive: { borderColor: colors.accent, backgroundColor: colors.primary + "66" },
   weaponCategoryText: { color: colors.text, fontFamily: font.bodyBold, fontSize: 11, textAlign: "center" },
+  bonusPill: {
+    flex: 1,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bg,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  bonusPillActive: { borderColor: colors.success, backgroundColor: colors.success + "33" },
   handle: { alignSelf: "center", width: 42, height: 5, borderRadius: 3, backgroundColor: colors.muted, marginBottom: 4 },
   sheetBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
   itemDescriptionInput: { minHeight: 130, paddingTop: 12 },
@@ -869,8 +981,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  skillRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 8 },
-  skillMod: { fontFamily: font.display, fontSize: 16, color: colors.accent, minWidth: 34, textAlign: "right" },
+  skillRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 4 },
+  skillToggle: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 4 },
+  skillRollBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 6, paddingHorizontal: 4 },
+  skillMod: { fontFamily: font.display, fontSize: 16, color: colors.accent, minWidth: 30, textAlign: "right" },
   featureRow: { backgroundColor: colors.surfaceAlt, borderRadius: radius.md, padding: 12 },
   lvlTag: { backgroundColor: colors.primary, paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.sm },
   infoResource: { flexDirection: "row", alignItems: "center", gap: 12 },

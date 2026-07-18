@@ -258,8 +258,48 @@ que permitir "instalar apps de origen desconocido" y abrir el archivo.
 
 Después, `eas update` permite pushear cambios de JS sin recompilar el APK entero.
 
+## Estado reciente (jul 2026) — features nuevas
+- **Motor de dados** (`src/lib/dice.ts` + `DiceProvider`): `rollD20(mod, mode)` con **ventaja/desventaja**
+  (2d20 se queda con el mayor/menor), `doubleForCrit(notación)` para el **crítico homebrew** (dobla dados
+  **y** modificador), flags `nat20`/`nat1`. `roll(notation, label?, opts?)` acepta
+  `{ mode, kind, onResolved }`. El modal muestra badge de crítico/pifia y el dado descartado atenuado.
+  Log de últimas 30 tiradas (`useDice().history`).
+- **Tirador reutilizable** `src/components/dice/DiceRoller.tsx`: grid de dados + selector de modo
+  (orden **Desventaja / Normal / Ventaja**) + "tirá con tu bono" + historial **desplegable**. Se usa en la
+  pestaña Dados y dentro de la ficha.
+- **Ficha tirable**: tocar habilidad/salvación/ataque tira `d20+mod`. Modo ventaja/desventaja compartido vía
+  **store zustand** `src/store/rollMode.ts` (NO context: cambiar de modo re-renderiza solo el selector, no
+  toda la ficha). Los botones leen `useRollMode((s) => s.consumeMode)` (selector estable) y llaman
+  `consumeMode()` al tirar (resetea a normal). El selector visible es `RollModeSelector`.
+- **Ataque de conjuro**: `spell.attackType` decide el flujo — presente → tirada de ataque (d20 + bono de
+  conjuro, con crítico); `savingThrow` → mostrar CD; ninguno → impacta directo. El botón de daño está
+  siempre disponible (se puede tirar sin apretar Atacar).
+- **Armas mágicas** `weapon.bonus` (+1/+2/+3, solo DM las crea): suma a ataque y daño. El **golpe sin arma**
+  (daño fijo "1") se representa como `1d1` para tener botón de daño como el resto.
+- **Furia del bárbaro**: toggle en la sección de armas (`character.raging`); `rageBonusForAttack` suma el
+  bono al daño cuerpo a cuerpo con Fuerza.
+- **Salvaciones de muerte** (`character.deathSaves`): tracker de 3 éxitos/3 fallos a 0 PV, con tirada en la
+  app o botones manuales Éxito/Fallo (para tirar en la mesa).
+- **Concentración** (`character.concentratingSpell`): al lanzar un hechizo de concentración se marca; banner
+  "Concentrándote en X · Soltar" arriba de los hechizos.
+- **Nombre y velocidad editables** desde la ficha (`TextEditorModal` y `NumberEditorModal`). Patrón de la
+  ficha: en las QuickStats/características, **tocar = InfoModal (qué es), mantener apretado = editar**.
+- **Nav por rol** (`app/(tabs)/_layout.tsx`): los **Players** NO ven los tabs Dados ni Combate (tienen todo
+  dentro de la pantalla del héroe); el **DM** sí. Patrón `href: isDM ? undefined : null`.
+- **"Es tu turno"**: banner en la pestaña Tracker de la ficha cuando el participante activo es tu PJ, y panel
+  con atajos (`MyTurnPanel`) en el tracker global del DM. Al "Combatir" se **tira la iniciativa** (d20 + DES).
+- **Onboarding** (flags por usuario en secure-store, `src/lib/onboarding.ts`): slides al primer login
+  (`app/onboarding.tsx`) y **tour de la ficha** (`HeroTour`, solo Players la primera vez) que recorre la
+  ficha de arriba abajo (scrollea + cambia de pestaña sola vía `onFocus`).
+- **Estados de error + toasts**: `ToastProvider` (`src/components/Toast.tsx`) + `onError` global del
+  `QueryClient` avisan cuando falla una mutación; ficha/tracker/héroes tienen rama de error con Reintentar.
+- **Glosario** (`app/glossary.tsx`, desde Perfil): condiciones, acciones de combate y conceptos.
+- **Accesibilidad**: `accessibilityRole`/`accessibilityLabel` en los controles de solo-ícono (volver, tacho,
+  +/- de vida, pips, dados, etc.).
+
 ## Reglas para cambios
 - Pantallas nuevas = archivo en `app/` (expo-router las enruta solo).
 - Datos nuevos del backend = agregá el hook en `api/hooks.ts` (con su tipo).
 - Antes de terminar, corré `npm run typecheck`.
 - Mantené la coherencia visual: tokens del tema, `Card`/`Button`/`Text`, animaciones sutiles.
+- Para tiradas de d20 desde la ficha, pasá `mode: consumeMode()` para respetar ventaja/desventaja.

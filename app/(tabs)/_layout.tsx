@@ -40,6 +40,8 @@ export default function TabsLayout() {
         name="dice"
         options={{
           title: "Dados",
+          // Los Players tienen el tirador dentro de la pantalla del héroe; solo el DM lo ve en el nav.
+          href: isDM ? undefined : null,
           tabBarIcon: ({ color, size }) => <Ionicons name="dice" size={size} color={color} />,
         }}
       />
@@ -47,6 +49,8 @@ export default function TabsLayout() {
         name="tracker"
         options={{
           title: "Combate",
+          // Los Players ven el combate en la pestaña Tracker del héroe; solo el DM lo ve en el nav.
+          href: isDM ? undefined : null,
           tabBarIcon: ({ color, size }) => <Ionicons name="flash" size={size} color={color} />,
         }}
       />

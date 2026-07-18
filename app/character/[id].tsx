@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { ActivityIndicator, LayoutChangeEvent, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { router, useLocalSearchParams, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { MotiView } from "moti";
@@ -12,6 +12,11 @@ import { Card } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { HpBar } from "@/components/HpBar";
 import { useDice } from "@/components/dice/DiceProvider";
+import { DiceRoller } from "@/components/dice/DiceRoller";
+import { useRollMode } from "@/store/rollMode";
+import { RollModeSelector } from "@/components/RollModeSelector";
+import { HeroTour, HeroTourStep } from "@/components/HeroTour";
+import { hasSeenHeroTour, markHeroTourSeen } from "@/lib/onboarding";
 import {
   useCharacter,
   useLevelUp,
@@ -38,10 +43,10 @@ import {
 } from "@/lib/sheet";
 import { ClassIcon } from "@/components/ClassIcon";
 import { RaceImage } from "@/components/RaceImage";
-import { parseDice, rollNotation } from "@/lib/dice";
+import { parseDice, rollNotation, doubleForCrit } from "@/lib/dice";
 import { CONDITION_OPTIONS, conditionLabel } from "@/lib/conditions";
 import { Section } from "@/components/sheet/Section";
-import { NumberEditorModal, ArmorModal, SubclassModal, RestModal } from "@/components/sheet/editors";
+import { NumberEditorModal, TextEditorModal, ArmorModal, SubclassModal, RestModal } from "@/components/sheet/editors";
 import {
   InventorySection,
   WeaponSection,
@@ -56,9 +61,11 @@ import { colors, font, radius, shadow } from "@/theme";
 
 export default function CharacterSheet() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data: character, isLoading } = useCharacter(id);
+  const { data: character, isLoading, isError, refetch } = useCharacter(id);
   const { data: tracker } = useTracker();
   const user = useAuth((s) => s.user);
+  const { roll } = useDice();
+  const consumeMode = useRollMode((s) => s.consumeMode);
   const cls = character?.classId as Clazz | undefined;
   const race = character?.raceId as Race | undefined;
 
@@ -78,9 +85,53 @@ export default function CharacterSheet() {
   const [tempHpEditOpen, setTempHpEditOpen] = useState(false);
   const [armorOpen, setArmorOpen] = useState(false);
   const [initEditOpen, setInitEditOpen] = useState(false);
+  const [speedEditOpen, setSpeedEditOpen] = useState(false);
+  const [nameEditOpen, setNameEditOpen] = useState(false);
   const [abilityEdit, setAbilityEdit] = useState<keyof typeof ABILITY_FULL | null>(null);
   const [infoModal, setInfoModal] = useState<{ title: string; body: string } | null>(null);
-  const [tab, setTab] = useState<"main" | "bag" | "combat" | "notes" | "tracker">("main");
+  const [tab, setTab] = useState<"main" | "bag" | "combat" | "notes" | "tracker" | "dice">("main");
+  const [tourVisible, setTourVisible] = useState(false);
+  const sheetScrollRef = useRef<ScrollView | null>(null);
+  const tabsY = useRef(0);
+
+  // Tour de la ficha la primera vez, solo para jugadores (el DM ya conoce la app).
+  useEffect(() => {
+    const isDMuser = user?.role === "dm" || user?.role === "admin";
+    if (!user || isDMuser) return;
+    hasSeenHeroTour(user.username).then((seen) => {
+      if (!seen) setTourVisible(true);
+    });
+  }, [user]);
+
+  // En cada paso del tour, movemos la pestaña y scrolleamos para que se vea lo que se explica.
+  // useCallback estable: si no, el polling del tracker recrearía la función y re-scrollearía solo.
+  const onTourFocus = useCallback((step: HeroTourStep) => {
+    if (step.tab) setTab(step.tab);
+    requestAnimationFrame(() => {
+      const y = step.focus === "top" ? 0 : Math.max(0, tabsY.current - 12);
+      sheetScrollRef.current?.scrollTo({ y, animated: true });
+    });
+  }, []);
+
+  const finishTour = () => {
+    setTourVisible(false);
+    requestAnimationFrame(() => sheetScrollRef.current?.scrollTo({ y: 0, animated: true }));
+    if (user?.username) markHeroTourSeen(user.username);
+  };
+
+  if (isError) {
+    return (
+      <Screen scroll={false}>
+        <Card style={{ marginTop: 80, marginHorizontal: 20 }}>
+          <Text variant="subtitle">No se pudo cargar el personaje</Text>
+          <Text variant="body" style={{ marginTop: 6 }}>
+            Revisá tu conexión y probá de nuevo.
+          </Text>
+          <Button label="Reintentar" icon="refresh" onPress={() => refetch()} style={{ marginTop: 12 }} />
+        </Card>
+      </Screen>
+    );
+  }
 
   if (isLoading || !character) {
     return (
@@ -109,12 +160,19 @@ export default function CharacterSheet() {
   const participants = tracker?.participants || [];
   const trackerParticipant = participants.find((p) => p.characterId === character._id);
   const inCombat = !!trackerParticipant;
+  const isMyTurn =
+    !!trackerParticipant && tracker?.activeIndex != null && participants[tracker.activeIndex]?._id === trackerParticipant._id;
   const isDM = user?.role === "dm" || user?.role === "admin";
   const canLevelUp = isDM || !!tracker?.levelUpEnabled;
   const needsSubclass = !!cls && character.level >= (cls.subclassLevel || 3) && !character.subclassIndex;
   const subclassBonusSpells = (character.subclassBonusSpells || [])
     .filter((s): s is Spell => !!s && typeof s === "object" && "level" in s)
     .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+
+  const concentratingSpell = character.concentratingSpell
+    ? [...visibleSpells, ...subclassBonusSpells].find((s) => s.index === character.concentratingSpell)
+    : null;
+  const concentratingName = concentratingSpell?.name || character.concentratingSpell;
 
   const pickCharacterImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -146,20 +204,39 @@ export default function CharacterSheet() {
     setHp.mutate(Math.max(0, Math.min(character.maxHp, character.currentHp + delta)));
   };
 
-  const onJoin = async () => {
-    await join.mutateAsync({ characterId: character._id, initiative: init });
-    setJoined(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  const onJoin = () => {
+    // Iniciativa real: d20 + mod de Destreza (init ya incluye Destreza + bono); entramos con ese total.
+    roll(`1d20${formatMod(init)}`, `Iniciativa (d20 ${formatMod(init)} de Destreza)`, {
+      onResolved: (res) => {
+        join.mutate({ characterId: character._id, initiative: res.total });
+        setJoined(true);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      },
+    });
   };
 
   return (
-    <Screen>
+    <Screen scrollViewRef={sheetScrollRef}>
       <Stack.Screen options={{ headerShown: false }} />
 
       {/* Header */}
       <View style={styles.topBar}>
-        <Ionicons name="arrow-back" size={24} color={colors.text} onPress={() => router.back()} />
-        <Ionicons name="trash-outline" size={22} color={colors.textFaint} onPress={() => setDeleteOpen(true)} />
+        <Ionicons
+          name="arrow-back"
+          size={24}
+          color={colors.text}
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Volver"
+        />
+        <Ionicons
+          name="trash-outline"
+          size={22}
+          color={colors.textFaint}
+          onPress={() => setDeleteOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Borrar personaje"
+        />
       </View>
 
       <View style={{ alignItems: "center", marginTop: 8 }}>
@@ -182,9 +259,16 @@ export default function CharacterSheet() {
             <ClassIcon index={cls?.index} size={15} color={colors.text} />
           </LinearGradient>
         </View>
-        <Text variant="display" center style={{ marginTop: 12 }}>
-          {character.name}
-        </Text>
+        <Pressable
+          onPress={() => setNameEditOpen(true)}
+          hitSlop={8}
+          style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 12 }}
+          accessibilityRole="button"
+          accessibilityLabel={`Editar nombre, actual ${character.name}`}
+        >
+          <Text variant="display" center>{character.name}</Text>
+          <Ionicons name="pencil" size={14} color={colors.textFaint} />
+        </Pressable>
         <Text variant="caption" center>
           {race?.name} · {cls?.name} · Nivel {character.level}
         </Text>
@@ -226,6 +310,18 @@ export default function CharacterSheet() {
           <TempHpButton value={character.tempHp || 0} onPress={() => setTempHpEditOpen(true)} />
           <FullHpButton onPress={() => updateChar.mutate({ currentHp: character.maxHp })} />
         </View>
+        {character.currentHp === 0 && (
+          <DeathSaveTracker
+            character={character}
+            update={updateChar.mutate}
+            onInfo={() =>
+              setInfoModal({
+                title: "Salvación de muerte",
+                body: "Estás a 0 de vida e inconsciente. Al empezar tu turno tirás 1d20: 10 o más es éxito, menos de 10 es fallo. Sacar 20 natural te levanta con 1 de vida. Sacar 1 natural cuenta como 2 fallos. 3 éxitos te estabilizan, 3 fallos y tu personaje muere. Curarte en cualquier momento borra los éxitos y fallos acumulados.",
+              })
+            }
+          />
+        )}
         <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
           <View style={{ flex: 1 }}>
             <Button label="Descanso corto" icon="cafe" variant="secondary" small onPress={() => setRestMode("short")} tintColor={accent} />
@@ -265,7 +361,9 @@ export default function CharacterSheet() {
         </Text>
       )}
 
-      <HeroTabs active={tab} onChange={setTab} />
+      <View onLayout={(e: LayoutChangeEvent) => { tabsY.current = e.nativeEvent.layout.y; }}>
+        <HeroTabs active={tab} onChange={setTab} />
+      </View>
 
       {tab === "main" && (
         <>
@@ -282,7 +380,7 @@ export default function CharacterSheet() {
           <View style={styles.quickRow}>
             <QuickStat icon="shield" label="CA" value={ac} onPress={() => setArmorOpen(true)} onInfo={() => setInfoModal({ title: "Clase de Armadura", body: "La CA es el número que el enemigo tiene que igualar o superar para pegarte." })} />
             <QuickStat icon="flash" label="Iniciativa" value={formatMod(init)} onPress={() => setInitEditOpen(true)} onInfo={() => setInfoModal({ title: "Iniciativa", body: "Se tira al empezar combate para decidir el orden de turnos." })} />
-            <QuickStat icon="walk" label="Velocidad" value={`${character.speed}`} onInfo={() => setInfoModal({ title: "Velocidad", body: "Cuántos pies puede moverse tu personaje en su turno." })} />
+            <QuickStat icon="walk" label="Velocidad" value={`${character.speed}`} onPress={() => setSpeedEditOpen(true)} onInfo={() => setInfoModal({ title: "Velocidad", body: "Cuántos pies puede moverse tu personaje en su turno." })} />
             {saveDC != null ? (
               <QuickStat icon="color-wand" label="CD Salv." value={saveDC} onInfo={() => setInfoModal({ title: "CD de salvación", body: "Es la dificultad que deben superar los enemigos cuando tus hechizos piden una salvación." })} />
             ) : (
@@ -290,18 +388,56 @@ export default function CharacterSheet() {
             )}
           </View>
 
-          <Text variant="label" style={{ marginTop: 22, marginBottom: 10 }}>HABILIDADES</Text>
+          <RollModeSelector />
+
+          <Pressable
+            style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 22, marginBottom: 10 }}
+            onPress={() =>
+              setInfoModal({
+                title: "Habilidades",
+                body: "El borde dorado marca las 2 salvaciones en las que tu clase es competente (suman tu bono de competencia). \"Salv +N\" es tu tirada de salvación con esa característica: tocala para tirar 1d20+N.",
+              })
+            }
+          >
+            <Text variant="label">HABILIDADES</Text>
+            <Ionicons name="information-circle-outline" size={13} color={colors.textFaint} />
+          </Pressable>
           <View style={styles.abilityGrid}>
             {ABILITY_ORDER.map((key, i) => {
               const score = character.abilityScores[key];
               const highlighted = classHighlightsAbility(cls, key);
               return (
                 <MotiView key={key} from={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} transition={{ type: "spring", damping: 14, delay: i * 45 }} style={{ width: "31%" }}>
-                  <Pressable onPress={() => setInfoModal({ title: ABILITY_FULL[key], body: ABILITY_DESCRIPTIONS[key] })} onLongPress={() => setAbilityEdit(key)} style={[styles.ability, highlighted && styles.abilityPrimary]}>
+                  <Pressable
+                    onPress={() => setInfoModal({ title: ABILITY_FULL[key], body: ABILITY_DESCRIPTIONS[key] })}
+                    onLongPress={() => setAbilityEdit(key)}
+                    style={[styles.ability, highlighted && styles.abilityPrimary]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${ABILITY_FULL[key]}, ${score}, modificador ${formatMod(abilityMod(score))}`}
+                    accessibilityHint="Mantené presionado para editar el puntaje"
+                  >
                     <Text variant="caption">{ABILITY_FULL[key]}</Text>
                     <Text style={styles.abilityMod}>{formatMod(abilityMod(score))}</Text>
                     <Text variant="caption" color={colors.textFaint}>{score}</Text>
-                    {cls && <Text variant="caption" color={cls.savingThrows?.includes(key) ? colors.accent : colors.textDim} style={{ marginTop: 2 }}>Salv {formatMod(saveModifier(key, character, cls))}</Text>}
+                    {cls && (
+                      <Pressable
+                        hitSlop={6}
+                        onPress={() =>
+                          roll(`1d20${formatMod(saveModifier(key, character, cls))}`, `Salvación de ${ABILITY_FULL[key]}`, {
+                            kind: "save",
+                            mode: consumeMode(),
+                          })
+                        }
+                        style={styles.saveTap}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Tirar salvación de ${ABILITY_FULL[key]}, modificador ${formatMod(saveModifier(key, character, cls))}`}
+                      >
+                        <Ionicons name="dice-outline" size={11} color={cls.savingThrows?.includes(key) ? colors.accent : colors.textDim} />
+                        <Text variant="caption" color={cls.savingThrows?.includes(key) ? colors.accent : colors.textDim}>
+                          Salv {formatMod(saveModifier(key, character, cls))}
+                        </Text>
+                      </Pressable>
+                    )}
                   </Pressable>
                 </MotiView>
               );
@@ -333,6 +469,16 @@ export default function CharacterSheet() {
           {cls.spellcasting && <Section title="Espacios de hechizos" icon="flame"><SpellSlotsSection character={character} cls={cls} update={updateChar.mutate} /></Section>}
           {cls.spellcasting && (
             <>
+              {!!character.concentratingSpell && (
+                <View style={styles.concentrationBanner}>
+                  <Ionicons name="eye" size={16} color={colors.accent} />
+                  <View style={{ flex: 1 }}>
+                    <Text variant="subtitle" style={{ fontSize: 14 }}>Concentrándote en {concentratingName}</Text>
+                    <Text variant="caption">Solo podés concentrarte en un hechizo a la vez.</Text>
+                  </View>
+                  <Button label="Soltar" icon="close" small variant="secondary" onPress={() => updateChar.mutate({ concentratingSpell: "" })} />
+                </View>
+              )}
               <Pressable onPress={() => router.push(`/spells/${id}`)} style={styles.manageSpellsButton}>
                 <Ionicons name="sparkles" size={18} color={colors.text} />
                 <Text style={styles.manageSpellsText}>Gestionar hechizos</Text>
@@ -369,9 +515,28 @@ export default function CharacterSheet() {
 
       {tab === "notes" && <NotesSection character={character} update={updateChar.mutate} />}
 
+      {tab === "dice" && (
+        <>
+          <Text variant="caption" style={{ marginBottom: 4 }}>
+            Tirador libre. Para tiradas con tu modificador (habilidades, salvaciones, ataques), usá las secciones
+            correspondientes en Main y Combate.
+          </Text>
+          <DiceRoller />
+        </>
+      )}
+
       {tab === "tracker" && (
         <Section title="Tracker" icon="list" defaultOpen>
-          <Text variant="caption" style={{ marginBottom: 10 }}>Combate actual. Para administrar todo el combate, abrí la pestaña Combate.</Text>
+          <Text variant="caption" style={{ marginBottom: 10 }}>Combate actual. El DM controla los turnos.</Text>
+          {isMyTurn && (
+            <View style={styles.myTurnBanner}>
+              <Ionicons name="flash" size={18} color={colors.bg} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.myTurnTitle}>¡Es tu turno, {character.name}!</Text>
+                <Text style={styles.myTurnBody}>Movés, hacés una acción (atacar o lanzar) y quizá una acción adicional.</Text>
+              </View>
+            </View>
+          )}
           {trackerParticipant && (
             <Button
               label="Salir del combate"
@@ -399,6 +564,8 @@ export default function CharacterSheet() {
       )}
 
       <InfoModal info={infoModal} onClose={() => setInfoModal(null)} />
+
+      <HeroTour visible={tourVisible} onFocus={onTourFocus} onDone={finishTour} />
 
       <LevelUpModal
         visible={levelUpOpen}
@@ -441,6 +608,25 @@ export default function CharacterSheet() {
         max={20}
         onClose={() => setInitEditOpen(false)}
         onSave={(v) => updateChar.mutate({ initiativeBonus: v })}
+      />
+      <NumberEditorModal
+        visible={speedEditOpen}
+        title="Velocidad"
+        subtitle="Cuántos pies se mueve tu personaje en su turno (normalmente 30)."
+        value={character.speed}
+        min={0}
+        max={120}
+        onClose={() => setSpeedEditOpen(false)}
+        onSave={(v) => updateChar.mutate({ speed: v })}
+      />
+      <TextEditorModal
+        visible={nameEditOpen}
+        title="Nombre del personaje"
+        subtitle="Cómo se llama tu héroe."
+        value={character.name}
+        placeholder="Nombre"
+        onClose={() => setNameEditOpen(false)}
+        onSave={(v) => updateChar.mutate({ name: v })}
       />
       <NumberEditorModal
         visible={abilityEdit !== null}
@@ -525,8 +711,15 @@ function DeleteModal({ id, open, onClose }: { id: string; open: boolean; onClose
 }
 
 function HpButton({ label, onPress, light }: { label: string; onPress: () => void; light?: boolean }) {
+  const amount = label.replace(/[+-]/, "");
+  const a11yLabel = label.startsWith("-") ? `Restar ${amount} de vida` : `Sumar ${amount} de vida`;
   return (
-    <Pressable onPress={onPress} style={[styles.hpBtn, light ? styles.hpBtnLight : styles.hpBtnDark]}>
+    <Pressable
+      onPress={onPress}
+      style={[styles.hpBtn, light ? styles.hpBtnLight : styles.hpBtnDark]}
+      accessibilityRole="button"
+      accessibilityLabel={a11yLabel}
+    >
       <Text style={{ fontFamily: font.bodyBold, color: colors.text, fontSize: 15 }}>{label}</Text>
     </Pressable>
   );
@@ -547,6 +740,104 @@ function FullHpButton({ onPress }: { onPress: () => void }) {
       <Ionicons name="heart" size={15} color={colors.text} />
       <Text style={styles.fullHpText}>Full vida</Text>
     </Pressable>
+  );
+}
+
+/** Se muestra cuando currentHp llega a 0: tracker de 3 éxitos/3 fallos de salvación de muerte. */
+function DeathSaveTracker({
+  character,
+  update,
+  onInfo,
+}: {
+  character: Character;
+  update: (patch: Partial<Character>) => void;
+  onInfo: () => void;
+}) {
+  const { roll } = useDice();
+  const saves = character.deathSaves || { successes: 0, failures: 0 };
+  const stable = saves.successes >= 3;
+  const dead = saves.failures >= 3;
+
+  const addSuccess = () =>
+    update({ deathSaves: { successes: Math.min(3, saves.successes + 1), failures: saves.failures } });
+  const addFailure = () =>
+    update({ deathSaves: { successes: saves.successes, failures: Math.min(3, saves.failures + 1) } });
+
+  const rollSave = () => {
+    roll("1d20", "Salvación de muerte", {
+      kind: "save",
+      onResolved: (res) => {
+        if (res.nat20) {
+          update({ currentHp: 1, deathSaves: { successes: 0, failures: 0 } });
+          return;
+        }
+        if (res.nat1) {
+          update({ deathSaves: { successes: saves.successes, failures: Math.min(3, saves.failures + 2) } });
+          return;
+        }
+        if (res.total >= 10) addSuccess();
+        else addFailure();
+      },
+    });
+  };
+
+  return (
+    <View style={styles.deathSaveBox}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Ionicons name="skull" size={16} color={colors.danger} />
+        <Text variant="label" color={colors.text}>SALVACIÓN DE MUERTE</Text>
+        <Pressable onPress={onInfo} hitSlop={8}>
+          <Ionicons name="information-circle-outline" size={15} color={colors.textFaint} />
+        </Pressable>
+      </View>
+      {dead ? (
+        <Text variant="body" color={colors.danger} style={{ marginTop: 8 }}>
+          Tu personaje murió. Hablalo con el DM.
+        </Text>
+      ) : stable ? (
+        <Text variant="body" color={colors.success} style={{ marginTop: 8 }}>
+          Estabilizado: seguís inconsciente en 0, pero ya no hace falta tirar más.
+        </Text>
+      ) : (
+        <>
+          <View style={{ flexDirection: "row", gap: 24, marginTop: 10 }}>
+            <View>
+              <Text variant="caption" color={colors.success}>Éxitos</Text>
+              <DeathSaveDots count={saves.successes} color={colors.success} />
+            </View>
+            <View>
+              <Text variant="caption" color={colors.danger}>Fallos</Text>
+              <DeathSaveDots count={saves.failures} color={colors.danger} />
+            </View>
+          </View>
+          <Button
+            label="Tirar salvación de muerte"
+            icon="dice"
+            small
+            variant="secondary"
+            onPress={rollSave}
+            style={{ marginTop: 10 }}
+          />
+          <Text variant="caption" style={{ marginTop: 10 }}>
+            ¿Tiraste en la mesa? Cargá el resultado a mano:
+          </Text>
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 6 }}>
+            <Button label="Éxito" icon="checkmark" small variant="secondary" tintColor={colors.success} onPress={addSuccess} style={{ flex: 1 }} />
+            <Button label="Fallo" icon="close" small variant="secondary" tintColor={colors.danger} onPress={addFailure} style={{ flex: 1 }} />
+          </View>
+        </>
+      )}
+    </View>
+  );
+}
+
+function DeathSaveDots({ count, color }: { count: number; color: string }) {
+  return (
+    <View style={{ flexDirection: "row", gap: 6, marginTop: 4 }}>
+      {[0, 1, 2].map((i) => (
+        <View key={i} style={[styles.deathDot, { borderColor: color, backgroundColor: i < count ? color : "transparent" }]} />
+      ))}
+    </View>
   );
 }
 
@@ -581,8 +872,8 @@ function HeroTabs({
   active,
   onChange,
 }: {
-  active: "main" | "bag" | "combat" | "notes" | "tracker";
-  onChange: (tab: "main" | "bag" | "combat" | "notes" | "tracker") => void;
+  active: "main" | "bag" | "combat" | "notes" | "tracker" | "dice";
+  onChange: (tab: "main" | "bag" | "combat" | "notes" | "tracker" | "dice") => void;
 }) {
   const tabs = [
     { key: "main", icon: "person", label: "Main" },
@@ -590,6 +881,7 @@ function HeroTabs({
     { key: "combat", icon: "flash", label: "Combate" },
     { key: "notes", icon: "journal", label: "Notas" },
     { key: "tracker", icon: "list", label: "Tracker" },
+    { key: "dice", icon: "dice", label: "Dados" },
   ] as const;
   return (
     <View style={styles.heroTabs}>
@@ -871,7 +1163,10 @@ function SpellRow({
 }) {
   const [expanded, setExpanded] = useState(false);
   const [castOpen, setCastOpen] = useState(false);
+  const [lastAttackCrit, setLastAttackCrit] = useState(false);
+  const [pendingDamageNotation, setPendingDamageNotation] = useState<string | null>(null);
   const { roll } = useDice();
+  const consumeMode = useRollMode((s) => s.consumeMode);
   const text = spell.simpleDescription || spell.description?.[0] || "Sin descripción todavía.";
   const higherLevel = (spell.higherLevel || []).filter(Boolean);
   const slots = spellSlotsAt(cls, character);
@@ -882,15 +1177,48 @@ function SpellRow({
   const canCastWithSlot = spell.level === 0 || availableSlots.length > 0;
   const directCastNotation = spell.level > 0 && lowestAvailableSlot ? castNotationFor(spell, lowestAvailableSlot) : spell.dice;
   const mageArmorActive = character.armor === "mage-armor";
+  // "melee"/"ranged" -> pide tirada de ataque de conjuro; "" -> impacta solo o pide salvación (ya cubierta por CD Salv.).
+  const requiresAttackRoll = !!spell.attackType;
+  const spellAtk = spellAttackBonus(character, cls);
+
+  const rollDamage = (notation: string, label: string) => {
+    if (requiresAttackRoll) {
+      setPendingDamageNotation(notation);
+      roll(`1d20${formatMod(spellAtk || 0)}`, `${spell.name} · Ataque`, {
+        kind: "attack",
+        mode: consumeMode(),
+        onResolved: (res) => setLastAttackCrit(!!res.nat20),
+      });
+      return;
+    }
+    roll(notation, label);
+  };
+  // Daño a tirar: el del último ataque (puede ser upcast) o, si no atacaste, el daño base.
+  // Así se puede tirar el daño sin apretar Atacar antes (ej. tiraste el ataque en la mesa).
+  const attackDamageNotation = pendingDamageNotation ?? directCastNotation;
+  const rollSpellDamage = () => {
+    if (!attackDamageNotation) return;
+    const notation = lastAttackCrit ? doubleForCrit(attackDamageNotation) : attackDamageNotation;
+    roll(notation, `${spell.name} · Daño${lastAttackCrit ? " (¡Crítico!)" : ""}`, { kind: "damage" });
+    setPendingDamageNotation(null);
+    setLastAttackCrit(false);
+  };
+  // Al lanzar un hechizo de concentración, empezás a concentrarte en él (reemplaza el anterior).
+  const startConcentrationIfNeeded = () => {
+    if (!spell.concentration) return;
+    if (character.concentratingSpell !== spell.index) update({ concentratingSpell: spell.index });
+  };
   const castCantrip = () => {
     if (!spell.dice) return;
-    roll(spell.dice, `${spell.name} · Truco`);
+    startConcentrationIfNeeded();
+    rollDamage(spell.dice, `${spell.name} · Truco`);
   };
   const castWithSlot = (slotLevel: number) => {
     const notation = castNotationFor(spell, slotLevel);
     update({ spellSlotsUsed: setSpellSlotUsed(character, slotLevel - 1, (character.spellSlotsUsed?.[slotLevel - 1] || 0) + 1) });
+    startConcentrationIfNeeded();
     setCastOpen(false);
-    if (notation) roll(notation, `${spell.name} · Nivel ${slotLevel}`);
+    if (notation) rollDamage(notation, `${spell.name} · Nivel ${slotLevel}`);
   };
   const openCast = () => {
     if (spell.level === 0) return castCantrip();
@@ -944,17 +1272,34 @@ function SpellRow({
             )}
 
             {(!!spell.dice || spell.level > 0) && (
-              <View style={{ marginTop: 12 }}>
+              <View style={{ marginTop: 12, gap: 8 }}>
                 <Button
-                  label={canImproveWithHigherSlot ? "Lanzar hechizo" : directCastNotation ? `Lanzar ${directCastNotation}` : "Lanzar hechizo"}
-                  icon="dice"
+                  label={
+                    requiresAttackRoll
+                      ? "Atacar"
+                      : canImproveWithHigherSlot
+                        ? "Lanzar hechizo"
+                        : directCastNotation
+                          ? `Lanzar ${directCastNotation}`
+                          : "Lanzar hechizo"
+                  }
+                  icon={requiresAttackRoll ? "flash" : "dice"}
                   small
                   disabled={!canCastWithSlot}
                   variant={canCastWithSlot ? "primary" : "secondary"}
                   onPress={openCast}
                 />
+                {requiresAttackRoll && !!attackDamageNotation && (
+                  <Button
+                    label={`Tirar daño ${lastAttackCrit ? doubleForCrit(attackDamageNotation) : attackDamageNotation}`}
+                    icon="dice"
+                    small
+                    variant={lastAttackCrit ? undefined : "secondary"}
+                    onPress={rollSpellDamage}
+                  />
+                )}
                 {!canCastWithSlot && (
-                  <Text variant="caption" color={colors.textDim} style={{ marginTop: 6 }}>
+                  <Text variant="caption" color={colors.textDim}>
                     No te quedan espacios disponibles para lanzarlo.
                   </Text>
                 )}
@@ -1265,6 +1610,37 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   fullHpText: { fontFamily: font.bodyBold, color: colors.text, fontSize: 13 },
+  deathSaveBox: {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.danger + "55",
+  },
+  myTurnBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: colors.accent,
+    borderRadius: radius.md,
+    padding: 12,
+    marginBottom: 12,
+  },
+  myTurnTitle: { fontFamily: font.bodyBold, fontSize: 15, color: colors.bg },
+  myTurnBody: { fontFamily: font.body, fontSize: 12, color: colors.bg, marginTop: 2 },
+  concentrationBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    padding: 12,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: colors.accent + "66",
+  },
+  deathDot: { width: 16, height: 16, borderRadius: 8, borderWidth: 2 },
   hpBtn: { flex: 1, paddingVertical: 12, borderRadius: radius.md, alignItems: "center" },
   hpBtnDark: { backgroundColor: colors.primary },
   hpBtnLight: { backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border },
@@ -1377,6 +1753,7 @@ const styles = StyleSheet.create({
   },
   abilityPrimary: { borderColor: colors.warning, backgroundColor: colors.surfaceAlt },
   abilityMod: { fontFamily: font.display, fontSize: 22, color: colors.accent },
+  saveTap: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 2, paddingVertical: 2 },
   manageSpellsButton: {
     marginTop: 18,
     marginBottom: 10,

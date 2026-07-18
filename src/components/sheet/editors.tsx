@@ -67,6 +67,62 @@ export function NumberEditorModal({
   );
 }
 
+/* ---------- Editor de texto genérico (nombre del personaje...) ---------- */
+export function TextEditorModal({
+  visible,
+  title,
+  subtitle,
+  value,
+  placeholder,
+  maxLength = 40,
+  onClose,
+  onSave,
+}: {
+  visible: boolean;
+  title: string;
+  subtitle?: string;
+  value: string;
+  placeholder?: string;
+  maxLength?: number;
+  onClose: () => void;
+  onSave: (v: string) => void;
+}) {
+  const [val, setVal] = useState(value);
+  useEffect(() => setVal(value), [value, visible]);
+  const trimmed = val.trim();
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <MotiView
+          from={{ opacity: 0, scale: 0.85 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ type: "spring", damping: 15 }}
+          style={[styles.sheet, shadow.glow]}
+        >
+          <Text variant="title" center>{title}</Text>
+          {!!subtitle && <Text variant="caption" center style={{ marginTop: 4 }}>{subtitle}</Text>}
+          <TextInput
+            value={val}
+            onChangeText={setVal}
+            placeholder={placeholder}
+            placeholderTextColor={colors.textFaint}
+            maxLength={maxLength}
+            autoFocus
+            style={styles.textInput}
+          />
+          <Button
+            label="Guardar"
+            icon="checkmark"
+            disabled={!trimmed}
+            onPress={() => { if (trimmed) { onSave(trimmed); onClose(); } }}
+          />
+        </MotiView>
+      </Pressable>
+    </Modal>
+  );
+}
+
 function BigStep({ icon, onPress }: { icon: keyof typeof Ionicons.glyphMap; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} style={styles.bigStep}>
@@ -516,6 +572,20 @@ const styles = StyleSheet.create({
   stepperRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 16, marginVertical: 22 },
   bigStep: { width: 52, height: 52, borderRadius: radius.pill, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
   bigInput: { fontFamily: font.display, fontSize: 40, color: colors.text, minWidth: 80, textAlign: "center" },
+  textInput: {
+    marginTop: 16,
+    marginBottom: 18,
+    backgroundColor: colors.bg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    color: colors.text,
+    fontFamily: font.body,
+    fontSize: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    textAlign: "center",
+  },
   sheetBackdrop: { flex: 1, backgroundColor: colors.overlay, justifyContent: "flex-end" },
   bottomSheet: { backgroundColor: colors.surface, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, padding: 22, paddingBottom: 40, borderTopWidth: 1, borderColor: colors.border },
   handle: { alignSelf: "center", width: 42, height: 5, borderRadius: 3, backgroundColor: colors.muted, marginBottom: 16 },

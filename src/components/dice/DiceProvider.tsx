@@ -6,11 +6,35 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, font, radius, shadow } from "@/theme";
 import { Text } from "@/components/Text";
-import { parseDice, rollDice, RollResult } from "@/lib/dice";
+import { parseDice, rollWithMode, RollResult, RollMode } from "@/lib/dice";
+
+export type { RollMode } from "@/lib/dice";
+
+export type RollKind = "attack" | "save" | "skill" | "check" | "damage";
+
+export interface RollOptions {
+  mode?: RollMode;
+  kind?: RollKind;
+  /** Se llama con el resultado apenas se revela, útil para encadenar (ej. daño doblado si el ataque fue crítico). */
+  onResolved?: (result: RollResult) => void;
+}
+
+export interface RollHistoryEntry {
+  id: string;
+  label: string;
+  notation: string;
+  total: number;
+  nat20?: boolean;
+  nat1?: boolean;
+  timestamp: number;
+}
 
 interface DiceContextValue {
-  /** Tira una notación (ej "2d8") y muestra el modal animado. */
-  roll: (notation: string, label?: string) => void;
+  /** Tira una notación (ej "2d8") y muestra el modal animado. Con `opts.mode` aplica ventaja/desventaja
+   * si la notación es un d20 puro; con `opts.kind` marca el tipo para mostrar el badge de crítico/pifia. */
+  roll: (notation: string, label?: string, opts?: RollOptions) => void;
+  /** Últimas tiradas (más nueva primero), hasta 30. */
+  history: RollHistoryEntry[];
 }
 
 const DiceContext = createContext<DiceContextValue | null>(null);
@@ -26,11 +50,13 @@ export function DiceProvider({ children }: { children: ReactNode }) {
   const [rolling, setRolling] = useState(false);
   const [result, setResult] = useState<RollResult | null>(null);
   const [label, setLabel] = useState<string | undefined>();
+  const [history, setHistory] = useState<RollHistoryEntry[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const roll = useCallback((notation: string, lbl?: string) => {
+  const roll = useCallback((notation: string, lbl?: string, opts?: RollOptions) => {
     const parsed = parseDice(notation);
     if (!parsed) return;
+    const mode = opts?.mode ?? "normal";
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     setLabel(lbl || notation);
     setResult(null);
@@ -39,10 +65,27 @@ export function DiceProvider({ children }: { children: ReactNode }) {
 
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
-      const res = rollDice(parsed);
+      const res = rollWithMode(parsed, mode);
       setResult(res);
       setRolling(false);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Haptics.notificationAsync(
+        res.nat1 ? Haptics.NotificationFeedbackType.Error : Haptics.NotificationFeedbackType.Success
+      );
+      opts?.onResolved?.(res);
+      setHistory((h) =>
+        [
+          {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            label: lbl || notation,
+            notation: res.notation,
+            total: res.total,
+            nat20: res.nat20,
+            nat1: res.nat1,
+            timestamp: Date.now(),
+          },
+          ...h,
+        ].slice(0, 30)
+      );
     }, 750);
   }, []);
 
@@ -52,7 +95,7 @@ export function DiceProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <DiceContext.Provider value={{ roll }}>
+    <DiceContext.Provider value={{ roll, history }}>
       {children}
       <Modal visible={visible} transparent animationType="fade" onRequestClose={close}>
         <Pressable style={styles.backdrop} onPress={close}>
@@ -74,7 +117,9 @@ export function DiceProvider({ children }: { children: ReactNode }) {
               {rolling ? (
                 <TumblingDice />
               ) : (
-                result?.rolls.map((r, i) => <DieFace key={i} value={r.value} sides={r.sides} delay={i * 70} />)
+                result?.rolls.map((r, i) => (
+                  <DieFace key={i} value={r.value} sides={r.sides} delay={i * 70} discarded={r.discarded} />
+                ))
               )}
             </View>
 
@@ -86,8 +131,13 @@ export function DiceProvider({ children }: { children: ReactNode }) {
                   transition={{ type: "timing", duration: 300, delay: 150 }}
                   style={styles.totalWrap}
                 >
+                  {(result.nat20 || result.nat1) && (
+                    <View style={[styles.critBadge, result.nat20 ? styles.critBadgeGood : styles.critBadgeBad]}>
+                      <Text style={styles.critBadgeText}>{result.nat20 ? "¡CRÍTICO!" : "PIFIA"}</Text>
+                    </View>
+                  )}
                   <Text variant="caption" center>
-                    {result.rolls.map((r) => r.value).join(" + ")}
+                    {result.rolls.map((r) => (r.discarded ? `(${r.value})` : r.value)).join(" + ")}
                     {result.modifier ? ` ${result.modifier > 0 ? "+" : "−"} ${Math.abs(result.modifier)}` : ""}
                   </Text>
                   <Text style={styles.total}>{result.total}</Text>
@@ -104,12 +154,12 @@ export function DiceProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/** Dado individual con la cara revelada, entrada con rebote. */
-function DieFace({ value, sides, delay }: { value: number; sides: number; delay: number }) {
+/** Dado individual con la cara revelada, entrada con rebote. Un dado `discarded` (ventaja/desventaja) se ve atenuado. */
+function DieFace({ value, sides, delay, discarded }: { value: number; sides: number; delay: number; discarded?: boolean }) {
   return (
     <MotiView
       from={{ opacity: 0, scale: 0.4, rotate: "-25deg" }}
-      animate={{ opacity: 1, scale: 1, rotate: "0deg" }}
+      animate={{ opacity: discarded ? 0.4 : 1, scale: discarded ? 0.9 : 1, rotate: "0deg" }}
       transition={{ type: "spring", damping: 12, delay }}
       style={styles.die}
     >
@@ -161,4 +211,8 @@ const styles = StyleSheet.create({
   dieSides: { fontFamily: font.body, fontSize: 10, color: "rgba(255,255,255,0.6)", position: "absolute", bottom: 5 },
   totalWrap: { marginTop: 22, alignItems: "center", gap: 2 },
   total: { fontFamily: font.display, fontSize: 52, color: colors.accent, lineHeight: 58 },
+  critBadge: { paddingHorizontal: 14, paddingVertical: 5, borderRadius: radius.pill, marginBottom: 8 },
+  critBadgeGood: { backgroundColor: colors.success + "33", borderWidth: 1, borderColor: colors.success },
+  critBadgeBad: { backgroundColor: colors.danger + "33", borderWidth: 1, borderColor: colors.danger },
+  critBadgeText: { fontFamily: font.bodyBold, fontSize: 13, color: colors.text, letterSpacing: 1 },
 });

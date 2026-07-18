@@ -45,10 +45,13 @@ export function parseDice(input: string): ParsedDice | null {
 }
 
 export interface RollResult {
-  rolls: { sides: number; value: number }[];
+  rolls: { sides: number; value: number; discarded?: boolean }[];
   modifier: number;
   total: number;
   notation: string;
+  /** Solo se completa en tiradas de un solo d20 (ataque/salvación/skill/check). */
+  nat20?: boolean;
+  nat1?: boolean;
 }
 
 export function rollDie(sides: number): number {
@@ -75,4 +78,79 @@ export function rollDice(parsed: ParsedDice): RollResult {
 export function rollNotation(notation: string): RollResult | null {
   const parsed = parseDice(notation);
   return parsed ? rollDice(parsed) : null;
+}
+
+export type RollMode = "normal" | "advantage" | "disadvantage";
+
+/** Tira un d20 + modificador. Con ventaja/desventaja tira 2d20 y descarta el que no aplica. */
+export function rollD20(modifier: number, mode: RollMode = "normal"): RollResult {
+  const notation = modifier ? `1d20${modifier >= 0 ? "+" : ""}${modifier}` : "1d20";
+  const a = rollDie(20);
+
+  if (mode === "normal") {
+    return {
+      rolls: [{ sides: 20, value: a }],
+      modifier,
+      total: a + modifier,
+      notation,
+      nat20: a === 20,
+      nat1: a === 1,
+    };
+  }
+
+  const b = rollDie(20);
+  const keep = mode === "advantage" ? Math.max(a, b) : Math.min(a, b);
+  const aIsKept = a === keep;
+  const rolls = aIsKept
+    ? [{ sides: 20, value: a }, { sides: 20, value: b, discarded: true }]
+    : [{ sides: 20, value: b }, { sides: 20, value: a, discarded: true }];
+
+  return {
+    rolls,
+    modifier,
+    total: keep + modifier,
+    notation,
+    nat20: keep === 20,
+    nat1: keep === 1,
+  };
+}
+
+/**
+ * Tira una notación ya parseada, aplicando ventaja/desventaja SOLO si es un d20 puro (sin dados
+ * extra). Para el resto de notaciones (daño, tiradas de vida, etc.) ignora el modo y tira normal,
+ * pero igual marca `nat20`/`nat1` si resulta ser un único d20.
+ */
+export function rollWithMode(parsed: ParsedDice, mode: RollMode = "normal"): RollResult {
+  const isSingleD20 = parsed.terms.length === 1 && parsed.terms[0].count === 1 && parsed.terms[0].sides === 20;
+  if (mode !== "normal" && isSingleD20) {
+    return rollD20(parsed.modifier, mode);
+  }
+  const result = rollDice(parsed);
+  if (isSingleD20) {
+    return { ...result, nat20: result.rolls[0]?.value === 20, nat1: result.rolls[0]?.value === 1 };
+  }
+  return result;
+}
+
+/**
+ * Crítico homebrew: duplica la CANTIDAD de cada dado Y el modificador plano (no solo los dados,
+ * como en la regla oficial). Ej: "1d4+4" -> "2d4+8"; "2d6+3" -> "4d6+6".
+ */
+export function doubleForCrit(notation: string): string {
+  const parsed = parseDice(notation);
+  if (!parsed) return notation;
+
+  const parts: string[] = [];
+  parsed.terms.forEach((term, i) => {
+    const count = term.count * 2;
+    const sign = count >= 0 && i > 0 ? "+" : "";
+    parts.push(`${sign}${count}d${term.sides}`);
+  });
+
+  const doubledModifier = parsed.modifier * 2;
+  if (doubledModifier !== 0) {
+    parts.push(doubledModifier > 0 ? `+${doubledModifier}` : `${doubledModifier}`);
+  }
+
+  return parts.join("") || notation;
 }

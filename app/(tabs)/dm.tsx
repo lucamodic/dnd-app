@@ -32,6 +32,7 @@ export default function DmTools() {
   const [damageType, setDamageType] = useState("Cortante");
   const [properties, setProperties] = useState("");
   const [description, setDescription] = useState("");
+  const [weaponBonus, setWeaponBonus] = useState(0);
   const [monsterName, setMonsterName] = useState("");
   const [monsterHp, setMonsterHp] = useState("");
   const [monsterAc, setMonsterAc] = useState("");
@@ -64,6 +65,7 @@ export default function DmTools() {
       damageType: damageType.trim(),
       properties: properties.split(",").map((p) => p.trim()).filter(Boolean),
       description: description.trim(),
+      bonus: weaponBonus,
     });
     setWeaponName("");
     setWeaponCategory("simple-melee");
@@ -71,6 +73,7 @@ export default function DmTools() {
     setDamageType("Cortante");
     setProperties("");
     setDescription("");
+    setWeaponBonus(0);
   };
 
   const chooseWeaponCategory = (nextCategory: WeaponCategory) => {
@@ -145,6 +148,22 @@ export default function DmTools() {
           </View>
           <TextInput value={properties} onChangeText={setProperties} placeholder="Propiedades separadas por coma" placeholderTextColor={colors.textFaint} style={styles.input} />
           <TextInput value={description} onChangeText={setDescription} placeholder="Descripción" placeholderTextColor={colors.textFaint} multiline textAlignVertical="top" style={[styles.input, styles.textArea]} />
+          <Text variant="caption">Bono mágico (solo DM)</Text>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {[0, 1, 2, 3].map((value) => (
+              <Pressable
+                key={value}
+                onPressIn={() => {
+                  Keyboard.dismiss();
+                  setWeaponBonus(value);
+                }}
+                hitSlop={6}
+                style={[styles.categoryButton, { width: undefined, flex: 1 }, weaponBonus === value && styles.bonusButtonActive]}
+              >
+                <Text style={styles.categoryText}>{value === 0 ? "Ninguno" : `+${value}`}</Text>
+              </Pressable>
+            ))}
+          </View>
           <Button label="Crear arma" icon="hammer" onPress={onCreateWeapon} loading={createWeapon.isPending} disabled={!weaponName.trim()} />
           {createWeapon.error && <Text color={colors.danger}>{(createWeapon.error as Error).message}</Text>}
         </View>
@@ -203,5 +222,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   categoryButtonActive: { borderColor: colors.accent, backgroundColor: colors.primary + "66" },
+  bonusButtonActive: { borderColor: colors.success, backgroundColor: colors.success + "33" },
   categoryText: { color: colors.text, fontFamily: font.bodyBold, fontSize: 11, textAlign: "center" },
 });

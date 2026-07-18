@@ -40,7 +40,15 @@ export default function Profile() {
         </View>
       </Card>
 
-      <Button label="Cerrar sesión" icon="log-out" variant="secondary" onPress={onLogout} style={{ marginTop: 20 }} />
+      <Button
+        label="Cómo se juega / Glosario"
+        icon="book"
+        variant="secondary"
+        onPress={() => router.push("/glossary")}
+        style={{ marginTop: 20 }}
+      />
+
+      <Button label="Cerrar sesión" icon="log-out" variant="secondary" onPress={onLogout} style={{ marginTop: 12 }} />
     </Screen>
   )
 }
