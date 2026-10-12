@@ -208,6 +208,65 @@ export interface Character {
   subclassIndex: string;
   subclassName?: string;
   subclassBonusSpells?: Spell[];
+  /** Subconjunto de `knownSpells` preparado hoy. Vacío = todavía no eligió (ver `preparedOrAll`). */
+  preparedSpells: Spell[];
+  backgroundIndex: string;
+  /** El trasfondo completo, resuelto por el backend al leer el personaje. */
+  background?: Background | null;
+  /** Hechizos elegidos de los `spellChoices` del trasfondo. */
+  backgroundSpells: Spell[];
+  /** Gratis: los fijos del trasfondo + los elegidos. No cuentan contra los límites. */
+  backgroundBonusSpells?: Spell[];
+  /** Se suman a la lista de la clase: se eligen normal y SÍ cuentan al límite. */
+  backgroundExtraSpells?: Spell[];
+  /** Opciones de los `spellChoices` del trasfondo, ya resueltas a hechizos. */
+  backgroundSpellOptions?: BackgroundSpellOption[];
+}
+
+export interface BackgroundFeature {
+  name: string;
+  description: string;
+  active: boolean;
+}
+
+/** Hechizos gratis que el trasfondo deja elegir. No cuentan contra los límites del personaje. */
+export interface BackgroundSpellChoice {
+  key: string;
+  label: string;
+  spellLevel: number; // 0 = truco
+  count: number;
+  options: string[]; // índices de hechizo concretos
+  optionsFromClass: string[]; // índices de clase de cuya lista se puede elegir
+}
+
+/** Una elección de hechizo de trasfondo ya resuelta a hechizos concretos por el backend. */
+export interface BackgroundSpellOption {
+  key: string;
+  label: string;
+  spellLevel: number;
+  count: number;
+  spells: Spell[];
+}
+
+export interface Background {
+  _id: string;
+  index: string;
+  name: string;
+  nameEn: string;
+  source: string;
+  url: string;
+  category: string;
+  variantOf: string;
+  description: string;
+  skillProficiencies: string[];
+  skillProficienciesNote: string;
+  toolProficiencies: string;
+  languages: string;
+  equipment: string;
+  features: BackgroundFeature[];
+  bonusSpells: { level: number; spellIndexes: string[] }[];
+  spellChoices: BackgroundSpellChoice[];
+  extraSpellList: string[];
 }
 
 export interface Participant {
@@ -277,6 +336,9 @@ export const useMonsters = (search: string) =>
     ...catalogQueryOptions,
   });
 
+export const useBackgrounds = () =>
+  useQuery({ queryKey: ["backgrounds"], queryFn: () => api<Background[]>("/backgrounds"), ...catalogQueryOptions });
+
 export const useWeapons = () =>
   useQuery({ queryKey: ["weapons"], queryFn: () => api<Weapon[]>("/weapons"), ...catalogQueryOptions });
 
@@ -296,17 +358,24 @@ export const useUpdateCharacter = (id: string) => {
       await qc.cancelQueries({ queryKey: ["character", id] });
       const prev = qc.getQueryData<Character>(["character", id]);
       const optimisticPatch = { ...patch };
-      if (prev && Array.isArray(patch.knownSpells)) {
+      // knownSpells/preparedSpells/backgroundSpells viajan como string[] pero el cache guarda
+      // objetos Spell: hay que rehidratarlos o la ficha crashea al leer `._id`.
+      const spellIdFields = ["knownSpells", "preparedSpells", "backgroundSpells"] as const;
+      if (prev && spellIdFields.some((field) => Array.isArray(patch[field]))) {
         const catalog = qc
           .getQueriesData<Spell[]>({ queryKey: ["spells"] })
           .flatMap(([, list]) => list || []);
         const byId = new Map<string, Spell>();
-        for (const spell of [...catalog, ...(prev.knownSpells || [])]) {
+        const known = spellIdFields.flatMap((field) => prev[field] || []);
+        for (const spell of [...catalog, ...known]) {
           if (spell && typeof spell === "object") byId.set(spell._id, spell);
         }
-        optimisticPatch.knownSpells = (patch.knownSpells as unknown as string[])
-          .map((spellId) => byId.get(spellId))
-          .filter((spell): spell is Spell => !!spell);
+        for (const field of spellIdFields) {
+          if (!Array.isArray(patch[field])) continue;
+          optimisticPatch[field] = (patch[field] as unknown as string[])
+            .map((spellId) => byId.get(spellId))
+            .filter((spell): spell is Spell => !!spell);
+        }
       }
       if (prev) qc.setQueryData<Character>(["character", id], { ...prev, ...optimisticPatch });
       return { prev };
@@ -325,7 +394,14 @@ export const useUpdateCharacter = (id: string) => {
 export const useCreateCharacter = () => {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { name: string; raceId: string; classId: string; subclassIndex?: string; abilityScores?: Partial<AbilityScores> }) =>
+    mutationFn: (body: {
+      name: string;
+      raceId: string;
+      classId: string;
+      subclassIndex?: string;
+      backgroundIndex?: string;
+      abilityScores?: Partial<AbilityScores>;
+    }) =>
       api<Character>("/characters", { method: "POST", body }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["characters"] }),
   });

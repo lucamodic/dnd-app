@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { MotiView } from "moti";
 import { Ionicons } from "@expo/vector-icons";
 import { Text } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { SkeletonCard } from "@/components/Skeleton";
-import { useSubclasses } from "@/api/hooks";
+import { BackgroundSpellOption, useBackgrounds, useSubclasses } from "@/api/hooks";
 import { ARMORS, ARMOR_CATEGORY_LABEL, ArmorCategory } from "@/data/armors";
 import { WEAPON_CATEGORY_LABEL, WeaponCategory, Weapon } from "@/data/weapons";
 import { abilityMod, formatMod } from "@/lib/format";
@@ -308,6 +308,225 @@ export function SubclassModal({
 }
 
 const internalLevel = (level: number) => String(level || 3);
+
+/* ---------- Modal de trasfondo ---------- */
+
+const CATEGORY_LABEL: Record<string, string> = {
+  common: "Comunes",
+  setting: "De ambientación",
+  al: "Adventurers League",
+  ravnica: "Rávnica",
+  strixhaven: "Strixhaven",
+  "acq-inc": "Acquisitions Inc.",
+  amonkhet: "Amonkhet",
+  dragonlance: "Dragonlance",
+  innistrad: "Innistrad",
+  planescape: "Planescape",
+  spelljammer: "Spelljammer",
+  wildemount: "Wildemount",
+  homebrew: "Homebrew",
+};
+
+/** Orden de las secciones: lo más usado primero. */
+const CATEGORY_ORDER = [
+  "common", "setting", "al", "ravnica", "strixhaven", "acq-inc",
+  "amonkhet", "dragonlance", "innistrad", "planescape", "spelljammer", "wildemount", "homebrew",
+];
+
+export function BackgroundModal({
+  visible,
+  selected,
+  onClose,
+  onSave,
+  loading,
+}: {
+  visible: boolean;
+  selected?: string;
+  onClose: () => void;
+  onSave: (backgroundIndex: string) => void;
+  loading?: boolean;
+}) {
+  const { data: backgrounds, isLoading } = useBackgrounds();
+  const [sel, setSel] = useState(selected || "");
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    if (visible) {
+      setSel(selected || "");
+      setSearch("");
+    }
+  }, [visible, selected]);
+
+  // Con ~100 trasfondos el buscador no es opcional; agrupamos por categoría para poder hojear.
+  const groups = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const matching = (backgrounds || []).filter(
+      (b) => !query || b.name.toLowerCase().includes(query) || b.nameEn.toLowerCase().includes(query)
+    );
+    return CATEGORY_ORDER.map((category) => ({
+      category,
+      items: matching.filter((b) => b.category === category),
+    })).filter((group) => group.items.length > 0);
+  }, [backgrounds, search]);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.sheetBackdrop}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} />
+        <View style={styles.bottomSheet}>
+          <View style={styles.handle} />
+          <Text variant="title" style={{ marginBottom: 4 }}>Trasfondo</Text>
+          <Text variant="caption" style={{ marginBottom: 10 }}>
+            De dónde viene tu personaje. Te da competencias, equipo y una habilidad propia.
+          </Text>
+
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Buscar trasfondo..."
+            placeholderTextColor={colors.textFaint}
+            style={[styles.textInput, { marginTop: 4, marginBottom: 0, textAlign: "left" }]}
+          />
+
+          <ScrollView style={{ maxHeight: 340, marginTop: 10 }} showsVerticalScrollIndicator={false}>
+            {isLoading && Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+            {groups.map((group) => (
+              <View key={group.category}>
+                <Text variant="label" style={{ marginTop: 10, marginBottom: 6 }}>
+                  {(CATEGORY_LABEL[group.category] || group.category).toUpperCase()}
+                </Text>
+                {group.items.map((background) => {
+                  const active = sel === background.index;
+                  return (
+                    <Pressable
+                      key={background.index}
+                      onPress={() => setSel(background.index)}
+                      style={[styles.armorRow, active && styles.armorRowActive]}
+                    >
+                      <Ionicons
+                        name={active ? "radio-button-on" : "radio-button-off"}
+                        size={18}
+                        color={active ? colors.accent : colors.muted}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text variant="subtitle" style={{ fontSize: 14 }}>{background.name}</Text>
+                        <Text variant="caption" numberOfLines={active ? undefined : 2}>{background.description}</Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ))}
+            {!isLoading && !groups.length && (
+              <Text variant="body" style={{ paddingVertical: 12 }}>No encontramos ningún trasfondo con ese nombre.</Text>
+            )}
+          </ScrollView>
+
+          <Button
+            label="Elegir trasfondo"
+            icon="checkmark"
+            onPress={() => sel && onSave(sel)}
+            disabled={!sel}
+            loading={loading}
+            style={{ marginTop: 14 }}
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+/* ---------- Modal de hechizos que regala el trasfondo ---------- */
+export function BackgroundSpellsModal({
+  visible,
+  options,
+  selected,
+  onClose,
+  onSave,
+  loading,
+}: {
+  visible: boolean;
+  /** Elecciones ya resueltas a hechizos concretos por el backend. */
+  options: BackgroundSpellOption[];
+  selected: string[];
+  onClose: () => void;
+  onSave: (spellIds: string[]) => void;
+  loading?: boolean;
+}) {
+  const [sel, setSel] = useState<string[]>(selected);
+
+  useEffect(() => {
+    if (visible) setSel(selected);
+  }, [visible, selected]);
+
+  const toggle = (choice: BackgroundSpellOption, spellId: string) => {
+    const others = choice.spells.map((s) => s._id);
+    const mine = sel.filter((id) => others.includes(id));
+    if (mine.includes(spellId)) {
+      setSel(sel.filter((id) => id !== spellId));
+      return;
+    }
+    // Al llegar al tope, el más viejo sale para dejar entrar al nuevo.
+    const next = mine.length >= choice.count ? sel.filter((id) => id !== mine[0]) : sel;
+    setSel([...next, spellId]);
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.sheetBackdrop}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} />
+        <View style={styles.bottomSheet}>
+          <View style={styles.handle} />
+          <Text variant="title" style={{ marginBottom: 4 }}>Hechizos de tu trasfondo</Text>
+          <Text variant="caption" style={{ marginBottom: 10 }}>
+            Son gratis: no ocupan lugar entre los hechizos que podés conocer o preparar.
+          </Text>
+
+          <ScrollView style={{ maxHeight: 380 }} showsVerticalScrollIndicator={false}>
+            {options.map((choice) => {
+              const chosen = sel.filter((id) => choice.spells.some((s) => s._id === id));
+              return (
+                <View key={choice.key}>
+                  <Text variant="label" style={{ marginTop: 10, marginBottom: 6 }}>
+                    {choice.label.toUpperCase()} ({chosen.length}/{choice.count})
+                  </Text>
+                  {choice.spells.map((spell) => {
+                    const active = sel.includes(spell._id);
+                    return (
+                      <Pressable
+                        key={spell._id}
+                        onPress={() => toggle(choice, spell._id)}
+                        style={[styles.armorRow, active && styles.armorRowActive]}
+                      >
+                        <Ionicons
+                          name={active ? "checkbox" : "square-outline"}
+                          size={18}
+                          color={active ? colors.accent : colors.muted}
+                        />
+                        <View style={{ flex: 1 }}>
+                          <Text variant="subtitle" style={{ fontSize: 14 }}>{spell.name}</Text>
+                          {!!spell.simpleDescription && <Text variant="caption" numberOfLines={2}>{spell.simpleDescription}</Text>}
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                  {!choice.spells.length && (
+                    <Text variant="caption" style={{ paddingVertical: 8 }}>
+                      No hay hechizos disponibles para esta elección.
+                    </Text>
+                  )}
+                </View>
+              );
+            })}
+          </ScrollView>
+
+          <Button label="Guardar" icon="checkmark" onPress={() => onSave(sel)} loading={loading} style={{ marginTop: 14 }} />
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 
 /* ---------- Modal de arma equipada ---------- */
 export function WeaponModal({

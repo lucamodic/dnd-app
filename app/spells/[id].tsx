@@ -11,7 +11,7 @@ import { Button } from "@/components/Button";
 import { SkeletonCard } from "@/components/Skeleton";
 import { useCharacter, useClassSpells, useUpdateCharacter, Clazz, Spell } from "@/api/hooks";
 import { CONCENTRATION_INFO, spellLevelLabel } from "@/lib/format";
-import { maxUnlockedSpellLevel, cantripLimit, spellsKnownLimit } from "@/lib/sheet";
+import { maxUnlockedSpellLevel, cantripLimit, spellsKnownLimit, isPreparedCaster } from "@/lib/sheet";
 import { colors, font, radius } from "@/theme";
 
 /** ID de un hechizo conocido, sea el objeto Spell populado o el string suelto. */
@@ -31,6 +31,7 @@ export default function ManageSpells() {
   // Estado local para feedback instantáneo al tocar (no dependemos del cache optimista,
   // que puede tener otra forma mientras se refetchea).
   const [knownIds, setKnownIds] = useState<Set<string>>(new Set());
+  const [preparedIds, setPreparedIds] = useState<Set<string>>(new Set());
   const [seeded, setSeeded] = useState(false);
   const [flashId, setFlashId] = useState<string | null>(null);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
@@ -43,6 +44,7 @@ export default function ManageSpells() {
     if (!seeded && character?.knownSpells) {
       const ids = character.knownSpells.map(idOf).filter((x): x is string => !!x);
       setKnownIds(new Set(ids));
+      setPreparedIds(new Set((character.preparedSpells || []).map(idOf).filter((x): x is string => !!x)));
       setSeeded(true);
     }
   }, [character?.knownSpells, seeded]);
@@ -81,6 +83,13 @@ export default function ManageSpells() {
     [spells, knownIds]
   );
 
+  // Solo clérigo/druida/mago/paladín/artificiero preparan; el resto tiene listo lo que conoce.
+  const prepares = cls && character ? isPreparedCaster(cls, character.level) : false;
+  const preparedCount = useMemo(
+    () => (spells || []).filter((s) => s.level > 0 && preparedIds.has(s._id)).length,
+    [spells, preparedIds]
+  );
+
   const flash = (id: string) => {
     setFlashId(id);
     setTimeout(() => setFlashId((cur) => (cur === id ? null : cur)), 900);
@@ -104,7 +113,7 @@ export default function ManageSpells() {
     if (!isKnown) {
       // Chequeo de límite antes de agregar.
       const isCantrip = spell.level === 0;
-      const atLimit = isCantrip ? cantripCount >= cantripMax : spellCount >= spellMax;
+      const atLimit = isCantrip ? cantripCount >= cantripMax : !prepares && spellCount >= spellMax;
       if (atLimit) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
         flash(spell._id);
@@ -118,11 +127,43 @@ export default function ManageSpells() {
     else next.add(spell._id);
     setKnownIds(next);
     setPendingIds((cur) => new Set(cur).add(spell._id));
+
+    // Si deja de conocerlo, tampoco puede seguir preparado (el backend lo rechazaría).
+    const nextPrepared = new Set(preparedIds);
+    const unprepared = isKnown && nextPrepared.delete(spell._id);
+    if (unprepared) setPreparedIds(nextPrepared);
+
     update.mutate(
-      { knownSpells: Array.from(next) as any },
+      {
+        knownSpells: Array.from(next) as any,
+        ...(unprepared ? { preparedSpells: Array.from(nextPrepared) as any } : {}),
+      },
       { onSettled: () => setPendingIds((cur) => { const out = new Set(cur); out.delete(spell._id); return out; }) }
     );
-  }, [cantripCount, cantripMax, knownIds, spellCount, spellMax, update]);
+  }, [cantripCount, cantripMax, knownIds, prepares, preparedIds, spellCount, spellMax, update]);
+
+  /** Marca/desmarca un hechizo como preparado hoy. Los trucos nunca se preparan. */
+  const togglePrepared = useCallback((spell: Spell) => {
+    if (!prepares || spell.level === 0 || !knownIds.has(spell._id)) return;
+    const isPrepared = preparedIds.has(spell._id);
+
+    if (!isPrepared && preparedCount >= spellMax) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      flash(spell._id);
+      return;
+    }
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const next = new Set(preparedIds);
+    if (isPrepared) next.delete(spell._id);
+    else next.add(spell._id);
+    setPreparedIds(next);
+    setPendingIds((cur) => new Set(cur).add(spell._id));
+    update.mutate(
+      { preparedSpells: Array.from(next) as any },
+      { onSettled: () => setPendingIds((cur) => { const out = new Set(cur); out.delete(spell._id); return out; }) }
+    );
+  }, [knownIds, preparedCount, preparedIds, prepares, spellMax, update]);
 
   return (
     <Screen>
@@ -142,7 +183,7 @@ export default function ManageSpells() {
 
       <Text variant="caption" style={{ marginTop: 6, marginBottom: 10 }}>
         Tocá para elegir cuáles conocés. La ⭐ marca los recomendados. Los de nivel que todavía no
-        desbloqueaste aparecen bloqueados.
+        desbloqueaste aparecen bloqueados.{prepares ? " Después marcá con la estrella cuáles preparás hoy." : ""}
       </Text>
 
       {cls?.spellcasting && (
@@ -156,9 +197,17 @@ export default function ManageSpells() {
           <View style={styles.limitPill}>
             <Ionicons name="book" size={13} color={colors.accent} />
             <Text variant="caption" color={colors.textDim}>
-              Hechizos {spellCount}/{spellMax}
+              {prepares ? "Conocidos" : "Hechizos"} {spellCount}{prepares ? "" : `/${spellMax}`}
             </Text>
           </View>
+          {prepares && (
+            <View style={styles.limitPill}>
+              <Ionicons name="star" size={13} color={colors.warning} />
+              <Text variant="caption" color={colors.textDim}>
+                Preparados {preparedCount}/{spellMax}
+              </Text>
+            </View>
+          )}
         </View>
       )}
 
@@ -202,7 +251,11 @@ export default function ManageSpells() {
                     const known = knownIds.has(spell._id);
                     const locked = group.level > maxLvl;
                     const isCantrip = spell.level === 0;
-                    const atLimit = !known && (isCantrip ? cantripCount >= cantripMax : spellCount >= spellMax);
+                    // Los trucos siempre tienen tope. Los hechizos de nivel solo lo tienen en las
+                    // clases "de conocidos": las que preparan anotan todos los que quieran y el
+                    // tope se aplica recién al preparar.
+                    const atLimit =
+                      !known && (isCantrip ? cantripCount >= cantripMax : !prepares && spellCount >= spellMax);
                     const flashing = flashId === spell._id;
                     const pending = pendingIds.has(spell._id);
                     return (
@@ -217,6 +270,9 @@ export default function ManageSpells() {
                         open={openIds.has(spell._id)}
                         onPress={toggleSpellOpen}
                         onToggle={toggle}
+                        prepared={preparedIds.has(spell._id)}
+                        canPrepare={prepares && !isCantrip && known && !locked}
+                        onTogglePrepared={togglePrepared}
                         onConcentrationInfo={openConcentrationInfo}
                       />
                     );
@@ -256,6 +312,9 @@ const SpellChoiceRow = memo(function SpellChoiceRow({
   open,
   onPress,
   onToggle,
+  prepared,
+  canPrepare,
+  onTogglePrepared,
   onConcentrationInfo,
 }: {
   spell: Spell;
@@ -267,6 +326,9 @@ const SpellChoiceRow = memo(function SpellChoiceRow({
   open: boolean;
   onPress: (spellId: string) => void;
   onToggle: (spell: Spell, locked: boolean) => void;
+  prepared: boolean;
+  canPrepare: boolean;
+  onTogglePrepared: (spell: Spell) => void;
   onConcentrationInfo: () => void;
 }) {
   return (
@@ -289,13 +351,27 @@ const SpellChoiceRow = memo(function SpellChoiceRow({
             {spell.recommended && <Ionicons name="star" size={13} color={colors.warning} />}
           </View>
           <Text variant="caption" numberOfLines={1}>
-            {locked ? "Se desbloquea al subir de nivel" : spell.simpleDescription || spell.school}
+            {locked
+              ? "Se desbloquea al subir de nivel"
+              : canPrepare && !prepared
+                ? "Lo tenés anotado, pero no preparado hoy"
+                : spell.simpleDescription || spell.school}
           </Text>
         </View>
         {!!spell.dice && !locked && (
           <View style={styles.dice}>
             <Text style={{ fontFamily: font.bodyBold, fontSize: 12, color: colors.text }}>{spell.dice}</Text>
           </View>
+        )}
+        {canPrepare && (
+          <Pressable
+            onPress={(e) => { e.stopPropagation(); onTogglePrepared(spell); }}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={prepared ? `Despreparar ${spell.name}` : `Preparar ${spell.name}`}
+          >
+            <Ionicons name={prepared ? "star" : "star-outline"} size={19} color={prepared ? colors.warning : colors.muted} />
+          </Pressable>
         )}
         <Ionicons name={open ? "chevron-up" : "chevron-down"} size={16} color={colors.textFaint} />
       </View>

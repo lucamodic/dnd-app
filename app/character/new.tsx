@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { router, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -10,13 +10,18 @@ import { Text } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { SkeletonCard } from "@/components/Skeleton";
-import { useClasses, useRaces, useCreateCharacter, useRollStats, useSubclasses, Race, Clazz, AbilityScores, Subclass } from "@/api/hooks";
+import { useBackgrounds, useClasses, useRaces, useCreateCharacter, useRollStats, useSubclasses, Background, Race, Clazz, AbilityScores, Subclass } from "@/api/hooks";
 import { abilityMod, classHighlightsAbility, formatMod, raceAbilityBonusPreview, ABILITY_ORDER, ABILITY_LABELS, ABILITY_FULL } from "@/lib/format";
+import { SKILLS } from "@/lib/sheet";
 import { ClassIcon } from "@/components/ClassIcon";
 import { RaceImage } from "@/components/RaceImage";
 import { colors, font, radius } from "@/theme";
 
-type Step = 0 | 1 | 2 | 3;
+/**
+ * Los pasos del wizard se calculan, no se cuentan a mano: la especialidad solo aparece en las
+ * clases que la eligen a nivel 1, así que los índices se corren según la clase.
+ */
+type StepKey = "race" | "class" | "subclass" | "background" | "name";
 
 export default function NewCharacter() {
   const { data: races, isLoading: racesLoading } = useRaces();
@@ -24,15 +29,36 @@ export default function NewCharacter() {
   const createCharacter = useCreateCharacter();
   const rollStats = useRollStats();
 
-  const [step, setStep] = useState<Step>(0);
+  const [step, setStep] = useState(0);
   const [race, setRace] = useState<Race | null>(null);
   const [cls, setCls] = useState<Clazz | null>(null);
   const [subclass, setSubclass] = useState<Subclass | null>(null);
+  const [background, setBackground] = useState<Background | null>(null);
   const [name, setName] = useState("");
   const [stats, setStats] = useState<AbilityScores | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
   const { data: subclasses, isLoading: subclassesLoading } = useSubclasses(cls?.index);
+  const { data: backgrounds, isLoading: backgroundsLoading } = useBackgrounds();
+  const [backgroundSearch, setBackgroundSearch] = useState("");
+
+  const steps: StepKey[] = [
+    "race",
+    "class",
+    ...(cls?.subclassLevel === 1 ? (["subclass"] as StepKey[]) : []),
+    "background",
+    "name",
+  ];
+  const current = steps[step];
+  const isLastStep = step === steps.length - 1;
+
+  const visibleBackgrounds = useMemo(() => {
+    const query = backgroundSearch.trim().toLowerCase();
+    if (!query) return backgrounds || [];
+    return (backgrounds || []).filter(
+      (b) => b.name.toLowerCase().includes(query) || b.nameEn.toLowerCase().includes(query)
+    );
+  }, [backgrounds, backgroundSearch]);
   const bonusPreview = raceAbilityBonusPreview(race, cls, stats);
 
   useEffect(() => {
@@ -42,7 +68,7 @@ export default function NewCharacter() {
   // Al pasar al paso final, tiramos las características según la clase.
   const goToNaming = async () => {
     if (!cls) return;
-    setStep(cls.subclassLevel === 1 ? 3 : 2);
+    setStep(steps.indexOf("name"));
     try {
       setStats(await rollStats.mutateAsync(cls._id));
     } catch {
@@ -57,6 +83,7 @@ export default function NewCharacter() {
       raceId: race._id,
       classId: cls._id,
       ...(subclass ? { subclassIndex: subclass.index } : {}),
+      ...(background ? { backgroundIndex: background.index } : {}),
       ...(stats ? { abilityScores: stats } : {}),
     });
     router.replace(`/character/${character._id}`);
@@ -68,23 +95,23 @@ export default function NewCharacter() {
       <ScrollView
         ref={scrollRef}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.scrollContent, step < (cls?.subclassLevel === 1 ? 3 : 2) && { paddingBottom: 150 + insets.bottom }]}
+        contentContainerStyle={[styles.scrollContent, !isLastStep && { paddingBottom: 150 + insets.bottom }]}
       >
         <View style={styles.header}>
           <Ionicons
             name="arrow-back"
             size={24}
             color={colors.text}
-            onPress={() => (step === 0 ? router.back() : setStep((s) => (s - 1) as Step))}
+            onPress={() => (step === 0 ? router.back() : setStep((s) => s - 1))}
             accessibilityRole="button"
             accessibilityLabel="Volver"
           />
-          <StepDots step={step} total={cls?.subclassLevel === 1 ? 4 : 3} />
+          <StepDots step={step} total={steps.length} />
           <View style={{ width: 24 }} />
         </View>
 
         <AnimatePresence exitBeforeEnter>
-          {step === 0 && (
+          {current === "race" && (
             <MotiView key="race" {...slide} style={{ flex: 1 }}>
               <Text variant="display">Elegí tu raza</Text>
               <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
@@ -97,7 +124,7 @@ export default function NewCharacter() {
             </MotiView>
           )}
 
-          {step === 1 && (
+          {current === "class" && (
             <MotiView key="class" {...slide} style={{ flex: 1 }}>
               <Text variant="display">Elegí tu clase</Text>
               <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
@@ -110,7 +137,7 @@ export default function NewCharacter() {
             </MotiView>
           )}
 
-          {step === 2 && cls?.subclassLevel === 1 && (
+          {current === "subclass" && cls && (
             <MotiView key="subclass" {...slide} style={{ flex: 1 }}>
               <Text variant="display">Elegí especialidad</Text>
               <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
@@ -128,7 +155,39 @@ export default function NewCharacter() {
             </MotiView>
           )}
 
-          {((step === 2 && cls?.subclassLevel !== 1) || step === 3) && (
+          {current === "background" && (
+            <MotiView key="background" {...slide} style={{ flex: 1 }}>
+              <Text variant="display">Elegí trasfondo</Text>
+              <Text variant="body" style={{ marginTop: 4, marginBottom: 12 }}>
+                De dónde viene tu personaje antes de ser aventurero. Te da competencias, equipo y una
+                habilidad propia. Es opcional: podés elegirlo después desde la ficha.
+              </Text>
+              <TextInput
+                value={backgroundSearch}
+                onChangeText={setBackgroundSearch}
+                placeholder="Buscar trasfondo..."
+                placeholderTextColor={colors.textFaint}
+                style={styles.searchInput}
+              />
+              {backgroundsLoading && Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+              {visibleBackgrounds.map((b, i) => (
+                <BackgroundOption
+                  key={b.index}
+                  background={b}
+                  selected={background?.index === b.index}
+                  onPress={() => setBackground(background?.index === b.index ? null : b)}
+                  delay={Math.min(i, 8) * 40}
+                />
+              ))}
+              {!backgroundsLoading && !visibleBackgrounds.length && (
+                <Card>
+                  <Text variant="body">No encontramos ningún trasfondo con ese nombre.</Text>
+                </Card>
+              )}
+            </MotiView>
+          )}
+
+          {current === "name" && (
             <MotiView key="name" {...slide} style={{ flex: 1 }}>
               <Text variant="display">¿Cómo se llama?</Text>
               <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
@@ -244,17 +303,13 @@ export default function NewCharacter() {
           )}
         </AnimatePresence>
       </ScrollView>
-      {step < (cls?.subclassLevel === 1 ? 3 : 2) && (
+      {!isLastStep && (
         <View style={[styles.floatingNext, { bottom: 12 + insets.bottom }]}>
           <Button
-            label={step === 2 ? "Continuar" : "Siguiente"}
+            label={current === "background" && !background ? "Saltear por ahora" : "Siguiente"}
             icon="arrow-forward"
-            onPress={() => {
-              if (step === 0) setStep(1);
-              else if (step === 1 && cls?.subclassLevel === 1) setStep(2);
-              else goToNaming();
-            }}
-            disabled={step === 0 ? !race : step === 1 ? !cls : false}
+            onPress={() => (steps[step + 1] === "name" ? goToNaming() : setStep(step + 1))}
+            disabled={current === "race" ? !race : current === "class" ? !cls : false}
           />
         </View>
       )}
@@ -365,6 +420,42 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+function BackgroundOption({
+  background,
+  selected,
+  onPress,
+  delay,
+}: {
+  background: Background;
+  selected: boolean;
+  onPress: () => void;
+  delay: number;
+}) {
+  const skills = background.skillProficiencies
+    .map((index) => SKILLS.find((s) => s.index === index)?.label)
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <Card delay={delay} onPress={onPress} style={[styles.option, selected && styles.optionSelected]}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <Ionicons
+          name={selected ? "radio-button-on" : "radio-button-off"}
+          size={20}
+          color={selected ? colors.accent : colors.muted}
+        />
+        <View style={{ flex: 1 }}>
+          <Text variant="subtitle">{background.name}</Text>
+          <Text variant="caption" numberOfLines={selected ? undefined : 2} style={{ marginTop: 2 }}>
+            {background.description}
+          </Text>
+          {!!skills && <Text variant="caption" style={{ marginTop: 4 }}>Competencias: {skills}</Text>}
+        </View>
+      </View>
+    </Card>
+  );
+}
+
 function StepDots({ step, total }: { step: number; total: number }) {
   return (
     <View style={{ flexDirection: "row", gap: 8 }}>
@@ -382,6 +473,18 @@ const styles = StyleSheet.create({
   dotActive: { backgroundColor: colors.accent, width: 22 },
   dotDone: { backgroundColor: colors.secondary },
   option: { marginBottom: 12 },
+  searchInput: {
+    marginBottom: 12,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    color: colors.text,
+    fontFamily: font.body,
+    fontSize: 15,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
   optionSelected: { borderColor: colors.accent, borderWidth: 1.5 },
   optionRow: { flexDirection: "row", alignItems: "center", gap: 14 },
   raceImg: { width: 54, height: 54, borderRadius: radius.md, alignItems: "center", justifyContent: "center", overflow: "hidden" },

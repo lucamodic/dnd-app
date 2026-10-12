@@ -39,14 +39,14 @@ import {
 import { ABILITY_ORDER, ABILITY_FULL, ABILITY_DESCRIPTIONS, CONCENTRATION_INFO, abilityMod, classHighlightsAbility, formatMod, spellLevelLabel } from "@/lib/format";
 import {
   featuresUpTo, resourcesCount, computeAc, spellSaveDC, spellAttackBonus, initiative, maxUnlockedSpellLevel, saveModifier,
-  spellSlotsAt, setSpellSlotUsed,
+  spellSlotsAt, setSpellSlotUsed, preparedSpellIds, needsToPrepare,
 } from "@/lib/sheet";
 import { ClassIcon } from "@/components/ClassIcon";
 import { RaceImage } from "@/components/RaceImage";
 import { parseDice, rollNotation, doubleForCrit } from "@/lib/dice";
 import { CONDITION_OPTIONS, conditionLabel } from "@/lib/conditions";
 import { Section } from "@/components/sheet/Section";
-import { NumberEditorModal, TextEditorModal, ArmorModal, SubclassModal, RestModal } from "@/components/sheet/editors";
+import { NumberEditorModal, TextEditorModal, ArmorModal, SubclassModal, RestModal, BackgroundModal, BackgroundSpellsModal } from "@/components/sheet/editors";
 import {
   InventorySection,
   WeaponSection,
@@ -55,6 +55,7 @@ import {
   ResourcesSection,
   SpellSlotsSection,
   NotesSection,
+  BackgroundSection,
 } from "@/components/sheet/sections";
 import { useAuth } from "@/store/auth";
 import { colors, font, radius, shadow } from "@/theme";
@@ -79,6 +80,8 @@ export default function CharacterSheet() {
   const chooseSubclass = useChooseSubclass(id);
   const [levelUpOpen, setLevelUpOpen] = useState(false);
   const [subclassOpen, setSubclassOpen] = useState(false);
+  const [backgroundOpen, setBackgroundOpen] = useState(false);
+  const [backgroundSpellsOpen, setBackgroundSpellsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [joined, setJoined] = useState(false);
   const [hpEditOpen, setHpEditOpen] = useState(false);
@@ -169,8 +172,17 @@ export default function CharacterSheet() {
     .filter((s): s is Spell => !!s && typeof s === "object" && "level" in s)
     .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
 
+  const background = character.background || null;
+  // Qué tiene listo para lanzar hoy. Si nunca eligió, `preparedSpellIds` devuelve todo lo conocido.
+  const preparedIds = preparedSpellIds(cls, character);
+  const mustPrepare = needsToPrepare(cls, character);
+  const backgroundSpellOptions = character.backgroundSpellOptions || [];
+  const backgroundBonusSpells = (character.backgroundBonusSpells || [])
+    .filter((s): s is Spell => !!s && typeof s === "object" && "level" in s)
+    .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+
   const concentratingSpell = character.concentratingSpell
-    ? [...visibleSpells, ...subclassBonusSpells].find((s) => s.index === character.concentratingSpell)
+    ? [...visibleSpells, ...subclassBonusSpells, ...backgroundBonusSpells].find((s) => s.index === character.concentratingSpell)
     : null;
   const concentratingName = concentratingSpell?.name || character.concentratingSpell;
 
@@ -454,6 +466,16 @@ export default function CharacterSheet() {
               {classFeatureItems.length > 0 && <View style={{ gap: 8 }}><Text variant="label">HABILIDADES DE CLASE</Text><FeatureList items={classFeatureItems} /></View>}
             </Section>
           )}
+
+          <Section title="Trasfondo" icon="book" badge={background ? undefined : "!"}>
+            <BackgroundSection
+              background={background}
+              hasSpellChoices={backgroundSpellOptions.length > 0}
+              chosenSpellCount={(character.backgroundSpells || []).length}
+              onChange={() => setBackgroundOpen(true)}
+              onChooseSpells={() => setBackgroundSpellsOpen(true)}
+            />
+          </Section>
         </>
       )}
 
@@ -484,11 +506,40 @@ export default function CharacterSheet() {
                 <Text style={styles.manageSpellsText}>Gestionar hechizos</Text>
               </Pressable>
               <Text variant="caption" style={{ marginBottom: 10 }}>Para pegar con un hechizo tirá d20{spellAtk != null ? ` ${formatMod(spellAtk)}` : ""}.</Text>
+              {mustPrepare && (
+                <Pressable onPress={() => router.push(`/spells/${id}`)} style={styles.concentrationBanner}>
+                  <Ionicons name="star-outline" size={16} color={colors.warning} />
+                  <View style={{ flex: 1 }}>
+                    <Text variant="subtitle" style={{ fontSize: 14 }}>Todavía no elegiste qué preparar</Text>
+                    <Text variant="caption">Tu clase prepara hechizos cada día. Por ahora te mostramos todos los que conocés.</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={colors.textFaint} />
+                </Pressable>
+              )}
               {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((lvl) => {
                 const spells = visibleSpells.filter((s) => s.level === lvl);
                 if (!spells.length) return null;
-                return <View key={lvl}><Text variant="label" style={{ marginTop: 14, marginBottom: 8 }}>{spellLevelLabel(lvl).toUpperCase()}</Text>{spells.map((s, i) => <SpellRow key={s._id} spell={s} delay={i * 25} character={character} cls={cls} update={updateChar.mutate} onConcentrationInfo={() => setInfoModal(CONCENTRATION_INFO)} />)}</View>;
+                return <View key={lvl}><Text variant="label" style={{ marginTop: 14, marginBottom: 8 }}>{spellLevelLabel(lvl).toUpperCase()}</Text>{spells.map((s, i) => <SpellRow key={s._id} spell={s} delay={i * 25} character={character} cls={cls} update={updateChar.mutate} prepared={preparedIds.has(s._id)} onConcentrationInfo={() => setInfoModal(CONCENTRATION_INFO)} />)}</View>;
               })}
+              {backgroundBonusSpells.length > 0 && (
+                <View>
+                  <Text variant="label" style={{ marginTop: 18, marginBottom: 8 }}>
+                    CONJUROS DE TU TRASFONDO
+                  </Text>
+                  <Text variant="caption" style={{ marginBottom: 10 }}>Siempre preparados. No cuentan contra tus límites.</Text>
+                  {backgroundBonusSpells.map((s, i) => (
+                    <SpellRow
+                      key={s._id}
+                      spell={s}
+                      delay={i * 25}
+                      character={character}
+                      cls={cls}
+                      update={updateChar.mutate}
+                      onConcentrationInfo={() => setInfoModal(CONCENTRATION_INFO)}
+                    />
+                  ))}
+                </View>
+              )}
               {subclassBonusSpells.length > 0 && (
                 <View>
                   <Text variant="label" style={{ marginTop: 18, marginBottom: 8 }}>
@@ -662,6 +713,29 @@ export default function CharacterSheet() {
         onClose={() => setArmorOpen(false)}
         onSave={(patch) => updateChar.mutate(patch)}
       />
+      <BackgroundModal
+        visible={backgroundOpen}
+        selected={character.backgroundIndex}
+        onClose={() => setBackgroundOpen(false)}
+        loading={updateChar.isPending}
+        onSave={async (backgroundIndex) => {
+          await updateChar.mutateAsync({ backgroundIndex } as any);
+          setBackgroundOpen(false);
+        }}
+      />
+      {!!backgroundSpellOptions.length && (
+        <BackgroundSpellsModal
+          visible={backgroundSpellsOpen}
+          options={backgroundSpellOptions}
+          selected={(character.backgroundSpells || []).map((s) => s._id)}
+          onClose={() => setBackgroundSpellsOpen(false)}
+          loading={updateChar.isPending}
+          onSave={async (spellIds) => {
+            await updateChar.mutateAsync({ backgroundSpells: spellIds } as any);
+            setBackgroundSpellsOpen(false);
+          }}
+        />
+      )}
       <SubclassModal
         visible={subclassOpen}
         classIndex={cls?.index}
@@ -1152,6 +1226,7 @@ function SpellRow({
   character,
   cls,
   update,
+  prepared = true,
   onConcentrationInfo,
 }: {
   spell: Spell;
@@ -1159,6 +1234,8 @@ function SpellRow({
   character: Character;
   cls: Clazz;
   update: (patch: Partial<Character>) => void;
+  /** `false` = lo conoce pero hoy no lo preparó. Los de subclase/trasfondo están siempre listos. */
+  prepared?: boolean;
   onConcentrationInfo: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -1228,7 +1305,7 @@ function SpellRow({
 
   return (
     <>
-    <Card delay={delay} style={{ marginBottom: 10 }} onPress={() => setExpanded((e) => !e)}>
+    <Card delay={delay} style={[{ marginBottom: 10 }, !prepared && { opacity: 0.55 }]} onPress={() => setExpanded((e) => !e)}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <View style={styles.spellLevel}>
           <Text style={{ color: colors.text, fontSize: 11, fontFamily: font.bodyBold }}>
@@ -1240,7 +1317,7 @@ function SpellRow({
             {spell.name}
           </Text>
           <Text variant="caption">
-            {spellLevelLabel(spell.level)} · {spell.school}
+            {prepared ? `${spellLevelLabel(spell.level)} · ${spell.school}` : "No preparado hoy"}
           </Text>
         </View>
         {spell.concentration && (

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Dimensions, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { MotiView } from "moti";
 import { Ionicons } from "@expo/vector-icons";
-import { Character, Clazz, Race, ClassResource, useCreateWeapon, useWeapons, WeaponCategory } from "@/api/hooks";
+import { Background, Character, Clazz, Race, ClassResource, useCreateWeapon, useWeapons, WeaponCategory } from "@/api/hooks";
 import {
   SKILLS,
   skillModifier,
@@ -680,6 +680,83 @@ export function SkillsSection({
 }
 
 /* ---------- Lista de rasgos / habilidades (expandibles) ---------- */
+/* ---------- Trasfondo ---------- */
+export function BackgroundSection({
+  background,
+  hasSpellChoices,
+  chosenSpellCount,
+  onChange,
+  onChooseSpells,
+}: {
+  background: Background | null;
+  hasSpellChoices: boolean;
+  chosenSpellCount: number;
+  onChange: () => void;
+  onChooseSpells: () => void;
+}) {
+  if (!background) {
+    return (
+      <View style={{ gap: 10 }}>
+        <Text variant="caption">
+          De dónde viene tu personaje antes de ser aventurero. Te da competencias, equipo y una habilidad propia.
+        </Text>
+        <Button label="Elegir trasfondo" icon="book" onPress={onChange} />
+      </View>
+    );
+  }
+
+  const skills = background.skillProficiencies
+    .map((index) => SKILLS.find((s) => s.index === index)?.label)
+    .filter(Boolean) as string[];
+
+  return (
+    <View style={{ gap: 12 }}>
+      <View>
+        <Text variant="subtitle">{background.name}</Text>
+        <Text variant="caption" style={{ marginTop: 2 }}>{background.description}</Text>
+      </View>
+
+      {skills.length > 0 && (
+        <View style={styles.bgChipRow}>
+          {skills.map((label) => (
+            <View key={label} style={styles.bgChip}>
+              <Ionicons name="ribbon" size={12} color={colors.accent} />
+              <Text style={styles.bgChipText}>{label}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {!!background.skillProficienciesNote && (
+        <Text variant="caption">Competencias a elegir: {background.skillProficienciesNote}</Text>
+      )}
+
+      {background.features.length > 0 && <FeatureList items={background.features} />}
+
+      <View style={{ gap: 6 }}>
+        {!!background.toolProficiencies && background.toolProficiencies !== "Ninguna" && (
+          <Text variant="caption">Herramientas: {background.toolProficiencies}</Text>
+        )}
+        {!!background.languages && background.languages !== "Ninguno" && (
+          <Text variant="caption">Idiomas: {background.languages}</Text>
+        )}
+        {!!background.equipment && <Text variant="caption">Equipo: {background.equipment}</Text>}
+      </View>
+
+      {hasSpellChoices && (
+        <Button
+          label={chosenSpellCount > 0 ? "Cambiar hechizos del trasfondo" : "Elegir hechizos del trasfondo"}
+          icon="sparkles"
+          variant="secondary"
+          small
+          onPress={onChooseSpells}
+        />
+      )}
+      <Button label="Cambiar trasfondo" icon="swap-horizontal" variant="secondary" small onPress={onChange} />
+    </View>
+  );
+}
+
 export function FeatureList({
   items,
 }: {
@@ -845,6 +922,19 @@ function StepBtn({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMa
 }
 
 const styles = StyleSheet.create({
+  bgChipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  bgChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  bgChipText: { fontFamily: font.body, fontSize: 12, color: colors.text },
   rageToggle: {
     flexDirection: "row",
     alignItems: "center",

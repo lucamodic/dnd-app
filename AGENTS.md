@@ -297,6 +297,30 @@ Después, `eas update` permite pushear cambios de JS sin recompilar el APK enter
 - **Accesibilidad**: `accessibilityRole`/`accessibilityLabel` en los controles de solo-ícono (volver, tacho,
   +/- de vida, pips, dados, etc.).
 
+## Trasfondos y preparados vs conocidos (sep 2026)
+- **Trasfondo**: `useBackgrounds()` (`GET /backgrounds`, catálogo con caché de 24h). La ficha lo muestra
+  en una `Section "Trasfondo"` al final del tab `main` (`BackgroundSection` en `components/sheet/sections.tsx`),
+  y se elige con `BackgroundModal` (`components/sheet/editors.tsx`), que tiene buscador y agrupa por
+  categoría porque son 98. El wizard de creación tiene un paso opcional de trasfondo; sus pasos ahora
+  se calculan con un array `steps: StepKey[]` en vez de la aritmética `subclassLevel === 1 ? 3 : 2`
+  que estaba duplicada en cinco lugares.
+- **Hechizos de trasfondo**: el backend ya devuelve `backgroundSpellOptions` con cada elección resuelta
+  a hechizos concretos, así que `BackgroundSpellsModal` solo los pinta (no hay que resolver listas de
+  clase en la app). Los elegidos van a `character.backgroundSpells` y aparecen en el tab `combat` bajo
+  "CONJUROS DE TU TRASFONDO", con la misma leyenda que los de especialidad: no cuentan contra los límites.
+  Los `backgroundExtraSpells` (gremios de Rávnica, colegios de Strixhaven) sí cuentan: se eligen normal.
+- **Preparados**: `isPreparedCaster`, `preparedSpellIds` y `needsToPrepare` en `src/lib/sheet.ts`
+  (espejo del backend). En "Gestionar hechizos" las clases que preparan ven una tercera píldora
+  "Preparados n/máx" y una estrella por fila; los trucos no se preparan nunca y los hechizos anotados
+  no tienen tope (el tope `mod + nivel` se aplica al preparar). En la ficha, lo no preparado se ve
+  atenuado y dice "No preparado hoy".
+- **Compatibilidad**: `preparedSpells` vacío en una clase que prepara significa "todavía no eligió":
+  se muestran todos los conocidos como preparados (igual que antes) más un aviso que linkea a
+  Gestionar hechizos. Ningún personaje viejo cambia de comportamiento.
+- `useUpdateCharacter.onMutate` rehidrata `knownSpells`, `preparedSpells` y `backgroundSpells` (viajan
+  como `string[]` pero el cache guarda objetos `Spell`). Si se agrega otro array de IDs de hechizo,
+  sumarlo a `spellIdFields` o la ficha crashea leyendo `._id`.
+
 ## Reglas para cambios
 - Pantallas nuevas = archivo en `app/` (expo-router las enruta solo).
 - Datos nuevos del backend = agregá el hook en `api/hooks.ts` (con su tipo).

@@ -133,6 +133,41 @@ export function spellsKnownLimit(cls: Clazz, character: Character, level: number
   return Math.max(1, mod + effectiveLevel);
 }
 
+/**
+ * ¿Esta clase PREPARA hechizos (clérigo, druida, mago, paladín, artificiero) o simplemente los
+ * CONOCE (bardo, explorador, hechicero, brujo)? El SRD no le da un número de conocidos a las
+ * primeras porque preparan de toda su lista, así que `spellsKnown === 0` es la señal.
+ * El backend espeja esta misma función en `modules/characters/service.ts`.
+ */
+export function isPreparedCaster(cls: Clazz, level: number): boolean {
+  return Boolean(cls.spellcasting) && (progressionAt(cls, level)?.spellsKnown || 0) === 0;
+}
+
+/**
+ * Los hechizos que el personaje tiene listos para lanzar hoy.
+ *
+ * Si la clase prepara y `preparedSpells` está vacío, es un personaje que nunca tocó el selector
+ * (por ejemplo uno creado antes de que existiera esta función): mostramos todos los conocidos
+ * como preparados, que es exactamente el comportamiento de antes. En cuanto el jugador marque
+ * el primero, `preparedSpells` pasa a mandar.
+ */
+export function preparedSpellIds(cls: Clazz | undefined, character: Character): Set<string> {
+  const known = (character.knownSpells || []).map((s) => s._id);
+  if (!cls || !isPreparedCaster(cls, character.level)) return new Set(known);
+  const prepared = character.preparedSpells || [];
+  if (!prepared.length) return new Set(known);
+  // Los trucos nunca se preparan: siempre están listos.
+  const cantrips = (character.knownSpells || []).filter((s) => s.level === 0).map((s) => s._id);
+  return new Set([...cantrips, ...prepared.map((s) => s._id)]);
+}
+
+/** `true` si el personaje todavía no eligió qué preparar (y por eso vemos todo como preparado). */
+export function needsToPrepare(cls: Clazz | undefined, character: Character): boolean {
+  if (!cls || !isPreparedCaster(cls, character.level)) return false;
+  if ((character.preparedSpells || []).length) return false;
+  return (character.knownSpells || []).some((s) => s.level > 0);
+}
+
 /** CA calculada (misma fórmula que el backend): armadura + Destreza (según tope) + escudo + bonus. */
 export function computeAc(character: Character): number {
   const armor = ARMOR_BY_INDEX[character.armor] || ARMOR_BY_INDEX["none"];
