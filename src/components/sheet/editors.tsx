@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Text } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { SkeletonCard } from "@/components/Skeleton";
-import { BackgroundSpellOption, useBackgrounds, useSubclasses } from "@/api/hooks";
+import { BackgroundSpellOption, useBackgrounds, useFightingStyles, useSubclasses } from "@/api/hooks";
 import { ARMORS, ARMOR_CATEGORY_LABEL, ArmorCategory } from "@/data/armors";
 import { WEAPON_CATEGORY_LABEL, WeaponCategory, Weapon } from "@/data/weapons";
 import { abilityMod, formatMod } from "@/lib/format";
@@ -308,6 +308,80 @@ export function SubclassModal({
 }
 
 const internalLevel = (level: number) => String(level || 3);
+
+/* ---------- Modal de estilo de combate ---------- */
+
+export function FightingStyleModal({
+  visible,
+  selected,
+  onClose,
+  onSave,
+  loading,
+}: {
+  visible: boolean;
+  selected?: string;
+  onClose: () => void;
+  onSave: (fightingStyle: string) => void;
+  loading?: boolean;
+}) {
+  const { data: fightingStyles, isLoading } = useFightingStyles();
+  const [sel, setSel] = useState(selected || "");
+
+  useEffect(() => {
+    if (visible) setSel(selected || "");
+  }, [visible, selected]);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.sheetBackdrop}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} />
+        <View style={styles.bottomSheet}>
+          <View style={styles.handle} />
+          <Text variant="title" style={{ marginBottom: 4 }}>Estilo de combate</Text>
+          <Text variant="caption" style={{ marginBottom: 10 }}>
+            Elegí cómo peleás. Ganás un bono permanente por eso.
+          </Text>
+
+          <ScrollView style={{ maxHeight: 390 }} showsVerticalScrollIndicator={false}>
+            {isLoading && Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+            {(fightingStyles || []).map((style) => {
+              const active = sel === style.index;
+              return (
+                <Pressable
+                  key={style.index}
+                  onPress={() => setSel(style.index)}
+                  style={[styles.armorRow, active && styles.armorRowActive]}
+                >
+                  <Ionicons
+                    name={active ? "radio-button-on" : "radio-button-off"}
+                    size={18}
+                    color={active ? colors.accent : colors.muted}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text variant="subtitle" style={{ fontSize: 14 }}>{style.name}</Text>
+                    <Text variant="caption" numberOfLines={active ? undefined : 2}>{style.description}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+            {!isLoading && !fightingStyles?.length && (
+              <Text variant="body" style={{ paddingVertical: 12 }}>No hay estilos de combate cargados.</Text>
+            )}
+          </ScrollView>
+
+          <Button
+            label="Elegir estilo de combate"
+            icon="checkmark"
+            onPress={() => sel && onSave(sel)}
+            disabled={!sel}
+            loading={loading}
+            style={{ marginTop: 14 }}
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
 /* ---------- Modal de trasfondo ---------- */
 

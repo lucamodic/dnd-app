@@ -321,6 +321,18 @@ Después, `eas update` permite pushear cambios de JS sin recompilar el APK enter
   como `string[]` pero el cache guarda objetos `Spell`). Si se agrega otro array de IDs de hechizo,
   sumarlo a `spellIdFields` o la ficha crashea leyendo `._id`.
 
+## Estilo de combate del guerrero (oct 2026)
+- `useFightingStyles()` (`GET /fighting-styles`, catálogo con caché de 24h igual que `useBackgrounds`).
+- Wizard de creación (`app/character/new.tsx`): paso `"fightingStyle"` en el array `steps`, condicionado a
+  `cls?.index === "fighter"`. Usa `FightingStyleOption` (mirror de `SubclassOption`) y se manda en el payload
+  de creación como `fightingStyle`.
+- Ficha (`app/character/[id].tsx`): banner "Elegí tu estilo de combate" (`needsFightingStyle`) cuando el
+  personaje es guerrero y todavía no eligió; si ya eligió, el nombre debajo del título es tocable y reabre
+  el picker (así se puede cambiar después de creado). Se guarda con el PATCH genérico
+  (`updateChar.mutateAsync({ fightingStyle })`), no hay endpoint dedicado como el de subclase.
+- Modal: `FightingStyleModal` en `src/components/sheet/editors.tsx`, mismo patrón visual que `BackgroundModal`
+  pero sin agrupar por categoría (son ~14 opciones).
+
 ## Reglas para cambios
 - Pantallas nuevas = archivo en `app/` (expo-router las enruta solo).
 - Datos nuevos del backend = agregá el hook en `api/hooks.ts` (con su tipo).

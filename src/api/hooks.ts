@@ -208,6 +208,10 @@ export interface Character {
   subclassIndex: string;
   subclassName?: string;
   subclassBonusSpells?: Spell[];
+  /** Estilo de combate elegido (solo guerrero por ahora, "" si no eligió todavía). */
+  fightingStyle: string;
+  fightingStyleName?: string;
+  fightingStyleDescription?: string;
   /** Subconjunto de `knownSpells` preparado hoy. Vacío = todavía no eligió (ver `preparedOrAll`). */
   preparedSpells: Spell[];
   backgroundIndex: string;
@@ -267,6 +271,12 @@ export interface Background {
   bonusSpells: { level: number; spellIndexes: string[] }[];
   spellChoices: BackgroundSpellChoice[];
   extraSpellList: string[];
+}
+
+export interface FightingStyle {
+  index: string;
+  name: string;
+  description: string;
 }
 
 export interface Participant {
@@ -339,6 +349,13 @@ export const useMonsters = (search: string) =>
 export const useBackgrounds = () =>
   useQuery({ queryKey: ["backgrounds"], queryFn: () => api<Background[]>("/backgrounds"), ...catalogQueryOptions });
 
+export const useFightingStyles = () =>
+  useQuery({
+    queryKey: ["fighting-styles"],
+    queryFn: () => api<FightingStyle[]>("/fighting-styles"),
+    ...catalogQueryOptions,
+  });
+
 export const useWeapons = () =>
   useQuery({ queryKey: ["weapons"], queryFn: () => api<Weapon[]>("/weapons"), ...catalogQueryOptions });
 
@@ -400,6 +417,7 @@ export const useCreateCharacter = () => {
       classId: string;
       subclassIndex?: string;
       backgroundIndex?: string;
+      fightingStyle?: string;
       abilityScores?: Partial<AbilityScores>;
     }) =>
       api<Character>("/characters", { method: "POST", body }),

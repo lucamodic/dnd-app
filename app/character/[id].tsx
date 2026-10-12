@@ -46,7 +46,7 @@ import { RaceImage } from "@/components/RaceImage";
 import { parseDice, rollNotation, doubleForCrit } from "@/lib/dice";
 import { CONDITION_OPTIONS, conditionLabel } from "@/lib/conditions";
 import { Section } from "@/components/sheet/Section";
-import { NumberEditorModal, TextEditorModal, ArmorModal, SubclassModal, RestModal, BackgroundModal, BackgroundSpellsModal } from "@/components/sheet/editors";
+import { NumberEditorModal, TextEditorModal, ArmorModal, SubclassModal, RestModal, BackgroundModal, BackgroundSpellsModal, FightingStyleModal } from "@/components/sheet/editors";
 import {
   InventorySection,
   WeaponSection,
@@ -80,6 +80,7 @@ export default function CharacterSheet() {
   const chooseSubclass = useChooseSubclass(id);
   const [levelUpOpen, setLevelUpOpen] = useState(false);
   const [subclassOpen, setSubclassOpen] = useState(false);
+  const [fightingStyleOpen, setFightingStyleOpen] = useState(false);
   const [backgroundOpen, setBackgroundOpen] = useState(false);
   const [backgroundSpellsOpen, setBackgroundSpellsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -168,6 +169,7 @@ export default function CharacterSheet() {
   const isDM = user?.role === "dm" || user?.role === "admin";
   const canLevelUp = isDM || !!tracker?.levelUpEnabled;
   const needsSubclass = !!cls && character.level >= (cls.subclassLevel || 3) && !character.subclassIndex;
+  const needsFightingStyle = cls?.index === "fighter" && !character.fightingStyle;
   const subclassBonusSpells = (character.subclassBonusSpells || [])
     .filter((s): s is Spell => !!s && typeof s === "object" && "level" in s)
     .sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
@@ -289,6 +291,13 @@ export default function CharacterSheet() {
             Especialidad: {character.subclassName}
           </Text>
         )}
+        {!!character.fightingStyleName && (
+          <Pressable onPress={() => setFightingStyleOpen(true)} hitSlop={6}>
+            <Text variant="caption" center color={colors.accent}>
+              Estilo de combate: {character.fightingStyleName}
+            </Text>
+          </Pressable>
+        )}
       </View>
 
       {/* HP */}
@@ -385,6 +394,16 @@ export default function CharacterSheet() {
               <View style={{ flex: 1 }}>
                 <Text variant="subtitle" style={{ fontSize: 15 }}>Elegí tu especialidad</Text>
                 <Text variant="caption">Tu clase ya llegó al nivel para elegir su camino.</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+            </Pressable>
+          )}
+          {needsFightingStyle && (
+            <Pressable onPress={() => setFightingStyleOpen(true)} style={styles.subclassBanner}>
+              <Ionicons name="shield" size={16} color={colors.warning} />
+              <View style={{ flex: 1 }}>
+                <Text variant="subtitle" style={{ fontSize: 15 }}>Elegí tu estilo de combate</Text>
+                <Text variant="caption">Ganá un bono permanente según cómo peleás.</Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
             </Pressable>
@@ -747,6 +766,16 @@ export default function CharacterSheet() {
         onSave={async (subclassIndex) => {
           await chooseSubclass.mutateAsync(subclassIndex);
           setSubclassOpen(false);
+        }}
+      />
+      <FightingStyleModal
+        visible={fightingStyleOpen}
+        selected={character.fightingStyle}
+        onClose={() => setFightingStyleOpen(false)}
+        loading={updateChar.isPending}
+        onSave={async (fightingStyle) => {
+          await updateChar.mutateAsync({ fightingStyle } as any);
+          setFightingStyleOpen(false);
         }}
       />
     </Screen>

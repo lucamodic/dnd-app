@@ -10,7 +10,7 @@ import { Text } from "@/components/Text";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { SkeletonCard } from "@/components/Skeleton";
-import { useBackgrounds, useClasses, useRaces, useCreateCharacter, useRollStats, useSubclasses, Background, Race, Clazz, AbilityScores, Subclass } from "@/api/hooks";
+import { useBackgrounds, useClasses, useRaces, useCreateCharacter, useRollStats, useSubclasses, useFightingStyles, Background, Race, Clazz, AbilityScores, Subclass, FightingStyle } from "@/api/hooks";
 import { abilityMod, classHighlightsAbility, formatMod, raceAbilityBonusPreview, ABILITY_ORDER, ABILITY_LABELS, ABILITY_FULL } from "@/lib/format";
 import { SKILLS } from "@/lib/sheet";
 import { ClassIcon } from "@/components/ClassIcon";
@@ -21,7 +21,7 @@ import { colors, font, radius } from "@/theme";
  * Los pasos del wizard se calculan, no se cuentan a mano: la especialidad solo aparece en las
  * clases que la eligen a nivel 1, así que los índices se corren según la clase.
  */
-type StepKey = "race" | "class" | "subclass" | "background" | "name";
+type StepKey = "race" | "class" | "subclass" | "fightingStyle" | "background" | "name";
 
 export default function NewCharacter() {
   const { data: races, isLoading: racesLoading } = useRaces();
@@ -33,12 +33,14 @@ export default function NewCharacter() {
   const [race, setRace] = useState<Race | null>(null);
   const [cls, setCls] = useState<Clazz | null>(null);
   const [subclass, setSubclass] = useState<Subclass | null>(null);
+  const [fightingStyle, setFightingStyle] = useState<FightingStyle | null>(null);
   const [background, setBackground] = useState<Background | null>(null);
   const [name, setName] = useState("");
   const [stats, setStats] = useState<AbilityScores | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const insets = useSafeAreaInsets();
   const { data: subclasses, isLoading: subclassesLoading } = useSubclasses(cls?.index);
+  const { data: fightingStyles, isLoading: fightingStylesLoading } = useFightingStyles();
   const { data: backgrounds, isLoading: backgroundsLoading } = useBackgrounds();
   const [backgroundSearch, setBackgroundSearch] = useState("");
 
@@ -46,6 +48,7 @@ export default function NewCharacter() {
     "race",
     "class",
     ...(cls?.subclassLevel === 1 ? (["subclass"] as StepKey[]) : []),
+    ...(cls?.index === "fighter" ? (["fightingStyle"] as StepKey[]) : []),
     "background",
     "name",
   ];
@@ -83,6 +86,7 @@ export default function NewCharacter() {
       raceId: race._id,
       classId: cls._id,
       ...(subclass ? { subclassIndex: subclass.index } : {}),
+      ...(fightingStyle ? { fightingStyle: fightingStyle.index } : {}),
       ...(background ? { backgroundIndex: background.index } : {}),
       ...(stats ? { abilityScores: stats } : {}),
     });
@@ -132,7 +136,7 @@ export default function NewCharacter() {
               </Text>
               {classesLoading && Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} />)}
               {classes?.map((c, i) => (
-                <ClassOption key={c._id} cls={c} selected={cls?._id === c._id} onPress={() => { setCls(c); setSubclass(null); }} delay={i * 40} />
+                <ClassOption key={c._id} cls={c} selected={cls?._id === c._id} onPress={() => { setCls(c); setSubclass(null); setFightingStyle(null); }} delay={i * 40} />
               ))}
             </MotiView>
           )}
@@ -152,6 +156,25 @@ export default function NewCharacter() {
                   <Text variant="body">No hay especialidades cargadas para esta clase todavía.</Text>
                 </Card>
               )}
+            </MotiView>
+          )}
+
+          {current === "fightingStyle" && cls && (
+            <MotiView key="fightingStyle" {...slide} style={{ flex: 1 }}>
+              <Text variant="display">Estilo de combate</Text>
+              <Text variant="body" style={{ marginTop: 4, marginBottom: 16 }}>
+                Elegí cómo peleás. Podés saltearlo y elegirlo después desde la ficha.
+              </Text>
+              {fightingStylesLoading && Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+              {fightingStyles?.map((s, i) => (
+                <FightingStyleOption
+                  key={s.index}
+                  style={s}
+                  selected={fightingStyle?.index === s.index}
+                  onPress={() => setFightingStyle(fightingStyle?.index === s.index ? null : s)}
+                  delay={i * 40}
+                />
+              ))}
             </MotiView>
           )}
 
@@ -216,6 +239,11 @@ export default function NewCharacter() {
                 {!!subclass && (
                   <Text variant="caption" color={colors.accent}>
                     Especialidad: {subclass.name}
+                  </Text>
+                )}
+                {!!fightingStyle && (
+                  <Text variant="caption" color={colors.accent}>
+                    Estilo de combate: {fightingStyle.name}
                   </Text>
                 )}
                 <View style={styles.summaryRow}>
@@ -403,6 +431,35 @@ function SubclassOption({ subclass, selected, onPress, delay }: { subclass: Subc
           <Text variant="caption">Se elige a nivel {subclass.subclassLevel}</Text>
           <Text variant="body" numberOfLines={3} style={{ marginTop: 2, fontSize: 13 }}>
             {subclass.description}
+          </Text>
+        </View>
+        {selected && <Ionicons name="checkmark-circle" size={22} color={colors.accent} />}
+      </View>
+    </Card>
+  );
+}
+
+function FightingStyleOption({
+  style,
+  selected,
+  onPress,
+  delay,
+}: {
+  style: FightingStyle;
+  selected: boolean;
+  onPress: () => void;
+  delay: number;
+}) {
+  return (
+    <Card onPress={onPress} delay={delay} style={[styles.option, selected && styles.optionSelected]}>
+      <View style={styles.optionRow}>
+        <View style={styles.subclassDot}>
+          <Ionicons name="shield" size={22} color={colors.accent} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text variant="subtitle">{style.name}</Text>
+          <Text variant="body" numberOfLines={3} style={{ marginTop: 2, fontSize: 13 }}>
+            {style.description}
           </Text>
         </View>
         {selected && <Ionicons name="checkmark-circle" size={22} color={colors.accent} />}
